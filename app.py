@@ -6,7 +6,7 @@ import os
 
 st.set_page_config(page_title="Hisse Analiz Terminali", layout="wide")
 
-# Analiz Edilecek Ana Hisse Listesi
+# Analiz Edilecek Ana Hisse Listesi (Puanlama için)
 ANA_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
 
 def get_tv_bulk_data(start_row, row_count):
@@ -35,35 +35,37 @@ def get_tv_bulk_data(start_row, row_count):
 
 st.title("📈 Kurumsal Hisse Analiz Platformu")
 
-# VERİ GÜNCELLEME BÖLÜMÜ
+# 1. VERİ GÜNCELLEME VE PROGRESS BAR
 if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     all_rows = []
-    progress_bar = st.progress(0)
+    bar = st.progress(0)
     status_msg = st.empty()
     
-    for i in range(0, 14000, 1000):
-        status_msg.info(f"İşleniyor: {i} - {i+1000} arası veriler...")
-        batch = get_tv_bulk_data(i, 1000)
+    total = 14000
+    step = 1000
+    
+    for i in range(0, total, step):
+        status_msg.info(f"İşleniyor: {i} - {i+step} arası veriler...")
+        batch = get_tv_bulk_data(i, step)
         if batch: all_rows.extend(batch)
-        progress_bar.progress((i + 1000) / 14000)
+        bar.progress((i + step) / total)
         time.sleep(0.3)
         
     if all_rows:
         df_new = pd.DataFrame(all_rows)
         df_new.to_csv("canli_veriler.csv", index=False)
-        st.success("Veritabanı başarıyla güncellendi.")
+        status_msg.success("Veritabanı başarıyla güncellendi.")
         time.sleep(1)
         st.rerun()
 
 st.divider()
 
-# VERİ ANALİZ BÖLÜMÜ
-if os.path.exists("canli_veriler.csv"):
+# 2. VERİ ANALİZ VE FİLTRELEME
+if os.path.exists("canli_veriler.csv") and os.path.getsize("canli_veriler.csv") > 0:
     df = pd.read_csv("canli_veriler.csv")
     
-    # Sütun Doğrulama
-    required_cols = ['RSI7', 'RSI14', 'Fiyat', 'VWAP', 'RSI']
-    if all(col in df.columns for col in required_cols):
+    # Teknik Sütun Kontrolü
+    if 'RSI7' in df.columns and 'RSI14' in df.columns:
         
         c1, c2, c3 = st.columns(3)
         fiyat_limit = c1.number_input("Minimum Fiyat ($)", value=1.0)
@@ -73,32 +75,32 @@ if os.path.exists("canli_veriler.csv"):
         tab1, tab2 = st.tabs(["🎯 LİSTE ANALİZİ VE PUANLAMA", "📉 TEKNİK DİPTEN DÖNÜŞ"])
         
         with tab1:
-            st.subheader("Seçilmiş 11 Hisse İçin Puanlama")
+            st.subheader("Seçilmiş Hisse Senetleri Skor Tablosu")
             ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
             
-            def hesapla_puan(row):
-                p = 0
-                if row['Fiyat'] > row['VWAP']: p += 40
-                if row['RSI'] > 50: p += 30
-                if row['RSI7'] > row['RSI14']: p += 30
-                return p
+            def hesapla_skor(row):
+                score = 0
+                if row['Fiyat'] > row['VWAP']: score += 40
+                if row['RSI'] > 50: score += 30
+                if row['RSI7'] > row['RSI14']: score += 30
+                return score
 
             if not ana_df.empty:
-                ana_df['SKOR'] = ana_df.apply(hesapla_puan, axis=1)
-                st.dataframe(ana_df[['Hisse', 'Fiyat', 'SKOR', 'RSI', 'RSI7', 'RSI14']].sort_values(by="SKOR", ascending=False))
+                ana_df['SKOR'] = ana_df.apply(hesapla_skor, axis=1)
+                st.dataframe(ana_df[['Hisse', 'Fiyat', 'SKOR', 'RSI', 'RSI7', 'RSI14']].sort_values(by="SKOR", ascending=False), use_container_width=True)
             else:
-                st.warning("Seçili hisseler veritabanında bulunamadı. Lütfen listeyi güncelleyin.")
+                st.warning("Seçili hisseler veritabanında bulunamadı. Lütfen verileri güncelleyin.")
 
         with tab2:
-            st.info(f"Kriter: RSI < {rsi_esik} VE RSI(7) > RSI(14) (Yukarı Kesişim)")
+            st.info(f"Kriter: RSI < {rsi_esik} VE RSI(7) > RSI(14) (Pozitif Kesişim)")
             if st.button("Teknik Dip Taramasını Başlat"):
                 sonuc = df[(df['RSI'] < rsi_esik) & 
                            (df['RSI7'] > df['RSI14']) & 
                            (df['Fiyat'] >= fiyat_limit) & 
                            (df['Hacim'] >= hacim_limit)]
                 st.write(f"Kriterlere uyan {len(sonuc)} hisse bulundu.")
-                st.dataframe(sonuc.sort_values(by="Hacim", ascending=False))
+                st.dataframe(sonuc.sort_values(by="Hacim", ascending=False), use_container_width=True)
     else:
-        st.error("Veritabanı yapısı uyumsuz. Lütfen yukarıdaki butona basarak verileri yeniden indirin.")
+        st.error("Veritabanı yapısı mevcut analiz kriterlerini desteklemiyor. Lütfen yukarıdaki butona basarak verileri yeniden indirin.")
 else:
-    st.info("Sistemde kayıtlı veri bulunamadı. Lütfen taramayı başlatın.")
+    st.info("Sistemde analiz edilecek veri bulunamadı. Lütfen 'Sisteme Yükle' butonunu kullanın.")
