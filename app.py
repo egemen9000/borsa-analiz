@@ -4,118 +4,87 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title="Tam Kapasite Borsa Analizi", layout="wide")
+st.set_page_config(page_title="Hisse Scanner Pro", layout="wide")
 
-# Takip listesi
-ANA_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
-
-def get_tv_full_scan(start_row, row_count=1000):
+def get_tv_data(offset):
     url = "https://scanner.tradingview.com/america/scan"
-    # RSI7 ve RSI14 için en stabil teknik tanımlamalar
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
         "options": {"lang": "en"},
         "markets": ["america"],
-        "columns": [
-            "name", 
-            "close", 
-            "Relative.Strength.Index.7", 
-            "Relative.Strength.Index.14", 
-            "VWAP", 
-            "volume", 
-            "description"
-        ], 
+        "columns": ["name", "close", "Relative.Strength.Index.7", "Relative.Strength.Index.14", "VWAP", "volume"],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
-        "range": [start_row, start_row + row_count]
+        "range": [offset, offset + 1000]
     }
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            if "data" in data and len(data['data']) > 0:
-                return [{"Hisse": item['s'].split(":")[1], 
-                         "İsim": item['d'][6], 
-                         "Fiyat": item['d'][1], 
-                         "RSI7": item['d'][2], 
-                         "RSI14": item['d'][3], 
-                         "VWAP": item['d'][4], 
-                         "Hacim": item['d'][5]} 
-                        for item in data['data']]
-        return []
-    except:
-        return None # Hata durumunda döngüyü kırmamak için None
+        res = requests.post(url, json=payload, timeout=20)
+        if res.status_code == 200:
+            data = res.json()
+            return data.get('data', [])
+        else:
+            st.error(f"⚠️ API Hatası! Kod: {res.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"⚠️ Bağlantı Hatası: {str(e)}")
+        return None
 
-st.title("🚀 Tam Kapasite (14.212+) Hisse Tarama Sistemi")
+st.title("🚀 Kesintisiz 14.212+ Hisse Tarayıcı")
 
-# ANA BUTON
-if st.button("🔴 TÜM AMERİKA BORSASINI SIFIRDAN İNDİR"):
-    all_data = []
-    current_row = 0
-    step = 1000
+# İŞLEM MERKEZİ
+if st.button("🔴 TARAMAYI ŞİMDİ BAŞLAT (DURURSA TEKRAR BAS)"):
+    all_results = []
+    placeholder = st.empty()
+    progress = st.progress(0)
     
-    progress_bar = st.progress(0)
-    status_msg = st.empty()
-    
-    # Veri gelmeye devam ettiği sürece dön (Sınır koymadık, ne varsa çeker)
-    while True:
-        status_msg.info(f"⏳ {current_row}. satırdan sonrası taranıyor...")
-        batch = get_tv_full_scan(current_row, step)
+    # 15 binlik döngü (Garanticiyiz)
+    for i in range(0, 16000, 1000):
+        with placeholder.container():
+            st.warning(f"🔄 Şu an çekiliyor: {i} - {i+1000}...")
         
-        if batch is None: # Geçici bağlantı hatası
-            status_msg.warning("⚠️ Bağlantı hatası, 2 saniye sonra tekrar deneniyor...")
+        batch = get_tv_data(i)
+        
+        if batch is None: # Hata varsa durma, bir daha dene
             time.sleep(2)
-            continue
+            batch = get_tv_data(i)
             
-        if not batch: # Veri bitti (14.212. satıra ulaşıldı)
-            status_msg.success(f"✅ Tarama bitti! Toplam {len(all_data)} hisse bulundu.")
+        if batch:
+            parsed = [{"Hisse": x['s'].split(":")[1], "Fiyat": x['d'][1], "RSI7": x['d'][2], "RSI14": x['d'][3], "VWAP": x['d'][4], "Hacim": x['d'][5]} for x in batch]
+            all_results.extend(parsed)
+            st.info(f"✅ Toplam biriken: {len(all_results)} hisse")
+        else:
+            st.success("🏁 Veri akışı bitti (Son hisseye ulaşıldı).")
             break
             
-        all_data.extend(batch)
-        current_row += step
-        
-        # 15.000 üzerinden tahmini ilerleme çubuğu
-        progress_bar.progress(min(current_row / 15000, 1.0))
-        time.sleep(0.5) # API ban yemesin diye küçük bir es
-        
-    if all_data:
-        df_total = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
-        df_total.to_csv("canli_veriler.csv", index=False)
+        progress.progress(min((i + 1000) / 15000, 1.0))
+        time.sleep(1) # API'yi küstürme
+    
+    if all_results:
+        df = pd.DataFrame(all_results).drop_duplicates(subset=['Hisse'])
+        df.to_csv("canli_veriler.csv", index=False)
         st.balloons()
+        st.success(f"💾 {len(df)} hisse kaydedildi! Sayfa yenileniyor...")
+        time.sleep(2)
         st.rerun()
 
 st.divider()
 
+# VERİ GÖRÜNTÜLEME
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
+    df['RSI7'] = pd.to_numeric(df['RSI7'], errors='coerce')
+    df['RSI14'] = pd.to_numeric(df['RSI14'], errors='coerce')
+
+    t1, t2 = st.tabs(["📊 Sinyal Verenler", "📋 Tüm Liste (Ham)"])
     
-    # Sayısal veri zorunluluğu
-    for col in ['RSI7', 'RSI14', 'Fiyat', 'VWAP']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    tab1, tab2, tab3 = st.tabs(["🎯 PUANLAMA", "📉 ÖZEL SİNYAL (7 > 14)", "📂 TAM LİSTE (HAM)"])
-    
-    with tab1:
-        st.subheader("Büyük Hisseler Skor Tablosu")
-        ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
-        if not ana_df.empty:
-            # Basit Skor: Fiyat > VWAP (50p) + RSI7 > RSI14 (50p)
-            ana_df['SKOR'] = ((ana_df['Fiyat'] > ana_df['VWAP']).astype(int) * 50 + 
-                             (ana_df['RSI7'] > ana_df['RSI14']).astype(int) * 50)
-            st.dataframe(ana_df[['Hisse', 'SKOR', 'Fiyat', 'RSI7', 'RSI14', 'VWAP']].sort_values(by="SKOR", ascending=False))
-
-    with tab2:
-        # Senin istediğin o meşhur filtre: RSI14 dipte (aşırı satım) ve RSI7 yukarı kırmış
-        sinyal_df = df[(df['RSI14'] < 30) & (df['RSI7'] > df['RSI14'])].copy()
-        st.subheader(f"Dipten Dönüş Sinyali Veren {len(sinyal_df)} Hisse")
-        st.dataframe(sinyal_df.sort_values(by="Hacim", ascending=False))
-
-    with tab3:
-        st.subheader(f"Ham Veri Paneli (Toplam: {len(df)} Satır)")
-        # Arama kutusu (O 212 farkı burada görebilirsin)
-        ara = st.text_input("Hisse kodu ile ara:").upper()
-        if ara:
-            st.dataframe(df[df['Hisse'].str.contains(ara, na=False)])
-        else:
-            st.dataframe(df)
+    with t1:
+        # ANA FİLTRE: RSI14 < 30 ve RSI7 > RSI14
+        sinyal = df[(df['RSI14'] < 30) & (df['RSI7'] > df['RSI14'])].copy()
+        st.subheader(f"🎯 Dipten Dönüş Sinyali: {len(sinyal)} Hisse")
+        
+        st.dataframe(sinyal.sort_values(by="Hacim", ascending=False), use_container_width=True)
+        
+    with t2:
+        st.subheader(f"Toplam Veritabanı: {len(df)} Hisse")
+        st.dataframe(df, use_container_width=True)
 else:
-    st.warning("Veritabanı henüz oluşturulmadı. Yukarıdaki kırmızı butona basarak tüm piyasayı indirin.")
+    st.info("Henüz veri çekilmedi. Kırmızı butona basarak motoru çalıştır.")
