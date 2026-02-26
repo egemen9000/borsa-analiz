@@ -1,102 +1,41 @@
 import streamlit as st
 import pandas as pd
-import requests
-import time
 import os
 
-st.set_page_config(page_title="Şeffaf Hisse Analiz", layout="wide")
+st.set_page_config(page_title="RSI Kesin Sonuç", layout="wide")
 
-# 1. SEKME İÇİN SEÇİLMİŞ HİSSELER
-ANA_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
+st.title("🎯 RSI Kesişim Sinyalleri")
 
-def get_tv_bulk_data(start_row, row_count):
-    url = "https://scanner.tradingview.com/america/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
-        "options": {"lang": "en"},
-        "markets": ["america"],
-        "columns": [
-            "name", 
-            "close", 
-            "Relative.Strength.Index.7", 
-            "Relative.Strength.Index.14", 
-            "VWAP", 
-            "volume", 
-            "description"
-        ], 
-        "sort": {"sortBy": "volume", "sortOrder": "desc"},
-        "range": [start_row, start_row + row_count]
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            return [{"Hisse": item['s'].split(":")[1], 
-                     "İsim": item['d'][6], 
-                     "Fiyat": item['d'][1], 
-                     "RSI7": item['d'][2], 
-                     "RSI14": item['d'][3], 
-                     "VWAP": item['d'][4], 
-                     "Hacim": item['d'][5]} 
-                    for item in data['data']]
-    except: return []
-    return []
-
-st.title("📈 Şeffaf Hisse Analiz Platformu")
-
-# VERİ YÜKLEME BÖLÜMÜ
-if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE (VT SIFIRLA)"):
-    all_rows = []
-    bar = st.progress(0)
-    status = st.empty()
-    for i in range(0, 14000, 1000):
-        status.text(f"İndiriliyor: {i} / 14000")
-        batch = get_tv_bulk_data(i, 1000)
-        if batch: all_rows.extend(batch)
-        bar.progress((i + 1000) / 14000)
-        time.sleep(0.3)
-    if all_rows:
-        df_save = pd.DataFrame(all_rows)
-        df_save.to_csv("canli_veriler.csv", index=False)
-        st.success("Tüm veriler CSV dosyasına yazıldı!")
-        st.rerun()
-
-st.divider()
-
+# Veri tabanını oku
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
-    # Sayısal dönüşümler
-    for col in ['RSI7', 'RSI14', 'Fiyat', 'VWAP', 'Hacim']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # ÜÇÜNCÜ SEKME EKLENDİ
-    tab1, tab2, tab3 = st.tabs(["🎯 ANA HİSSELER", "📉 TEKNİK SİNYAL (7>14)", "📂 TÜM VERİTABANI (HAM VERİ)"])
     
-    with tab1:
-        st.subheader("Seçilmiş Dev Şirketler")
-        ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
-        st.dataframe(ana_df, use_container_width=True)
+    # Sayısal veri tipini garantiye al (Hata çıkmasın)
+    df['RSI7'] = pd.to_numeric(df['RSI7'], errors='coerce')
+    df['RSI14'] = pd.to_numeric(df['RSI14'], errors='coerce')
+    
+    # --- ASIL FİLTRE BURADA ---
+    # Şart 1: RSI14 kesinlikle 30'un altında olacak (Aşırı satım bölgesi)
+    # Şart 2: RSI7, RSI14'ün üstünde olacak (Yukarı kesişim/ivme)
+    mask = (df['RSI14'] < 30) & (df['RSI7'] > df['RSI14'])
+    sonuc = df[mask].copy()
 
-    with tab2:
-        st.subheader("RSI(14) < 30 ve RSI(7) > RSI(14) Kesişimi")
-        # Filtreleme
-        sinyal = df[(df['RSI14'] < 30) & (df['RSI7'] > df['RSI14'])].copy()
-        if not sinyal.empty:
-            st.success(f"Tam Sinyal Veren {len(sinyal)} Hisse Bulundu!")
-            st.dataframe(sinyal.sort_values(by="Hacim", ascending=False), use_container_width=True)
-        else:
-            st.warning("Bu kriterlere tam uyan hisse şu an yok. Ham veriden RSI7'leri kontrol et.")
-
-    with tab3:
-        st.subheader("Veritabanındaki Tüm Sütunlar ve Satırlar")
-        st.info(f"Toplam {len(df)} hisse kayıtlı. Sütun isimleri ve içerikleri aşağıdadır:")
+    if not sonuc.empty:
+        st.success(f"🚀 Kriterlere uyan tam **{len(sonuc)}** hisse bulundu!")
         
-        # ARAMA ÇUBUĞU (O 4 hisseyi ismen aratman için)
-        ara = st.text_input("Hisse kodu ile ara (Örn: NVDA):").upper()
-        if ara:
-            st.dataframe(df[df['Hisse'].str.contains(ara, na=False)], use_container_width=True)
-        else:
-            st.dataframe(df, use_container_width=True)
+        # Sonucu Hacim sırasına göre göster (En büyükler en üstte)
+        st.dataframe(
+            sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI14', 'RSI7', 'Hacim']]
+            .sort_values(by="Hacim", ascending=False),
+            use_container_width=True
+        )
+    else:
+        st.warning("Şu an her iki kuralı aynı anda sağlayan hisse bulunmuyor.")
+        st.info("İstersen aşağıdan ham verileri tekrar kontrol edebilirsin.")
+        
+    # Kontrol için en düşük RSI14'lü 10 hisseyi göster
+    with st.expander("Gözetim: En Düşük RSI(14) Değerine Sahip Hisseler"):
+        st.dataframe(df.sort_values(by="RSI14").head(10)[['Hisse', 'RSI14', 'RSI7']])
 
 else:
-    st.warning("Veritabanı boş. Lütfen yukarıdaki butona basarak verileri çekin.")
+    st.error("Veritabanı (canli_veriler.csv) bulunamadı. Lütfen önce ana sayfadan verileri yükleyin!")
