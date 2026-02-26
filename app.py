@@ -18,8 +18,8 @@ def get_tv_bulk_data(start_row, row_count):
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
-        # RSI(7) ve RSI(14) değerlerini de çekiyoruz
-        "columns": ["name", "close", "RSI", "VWAP", "volume", "description", "RSI[7]", "RSI[14]"],
+        # Sütun isimlerini TradingView formatına göre netleştiriyoruz
+        "columns": ["name", "close", "RSI", "VWAP", "volume", "description", "RSI7", "RSI14"],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [start_row, start_row + row_count]
     }
@@ -36,6 +36,7 @@ def get_tv_bulk_data(start_row, row_count):
 
 st.title("🏦 Dev Veri Deposu & Baboş Analiz")
 
+# GÜNCELLEME BUTONU
 if st.button("🚀 14.000 HİSSEYİ GÜNCELLE"):
     all_rows = []
     bar = st.progress(0)
@@ -47,7 +48,11 @@ if st.button("🚀 14.000 HİSSEYİ GÜNCELLE"):
         bar.progress((i + 1000) / 14000)
         time.sleep(0.3)
     if all_rows:
-        pd.DataFrame(all_rows).to_csv("canli_veriler.csv", index=False)
+        # Dosyayı sıfırdan temiz bir şekilde yazıyoruz
+        df_new = pd.DataFrame(all_rows)
+        df_new.to_csv("canli_veriler.csv", index=False)
+        st.success("Veritabanı başarıyla yenilendi!")
+        time.sleep(1)
         st.rerun()
 
 st.divider()
@@ -55,38 +60,43 @@ st.divider()
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
     
-    c1, c2, c3 = st.columns(3)
-    fiyat_limit = c1.number_input("Min Fiyat ($)", value=1.0)
-    hacim_limit = c2.number_input("Min Hacim", value=500000)
-    rsi_sinir = c3.slider("RSI Sınırı (Dipten Dönüş İçin)", 0, 100, 30)
-
-    tab1, tab2 = st.tabs(["🎯 11 BABOŞ PUANLAMA", "📉 TEKNİK DİPTEN DÖNÜŞ"])
-    
-    with tab1:
-        st.subheader("Seçilmiş 11 Hisse Puan Durumu")
-        babo_df = df[df['Hisse'].isin(BABOS_HISSELER)].copy()
+    # Sütun kontrolü (Hata almamak için)
+    required_cols = ['RSI7', 'RSI14', 'Fiyat', 'VWAP', 'RSI']
+    if all(col in df.columns for col in required_cols):
         
-        def puanla(row):
-            puan = 0
-            if row['Fiyat'] > row['VWAP']: puan += 40
-            if row['RSI'] > 50: puan += 30
-            if row['RSI7'] > row['RSI14']: puan += 30
-            return puan
+        c1, c2, c3 = st.columns(3)
+        fiyat_limit = c1.number_input("Min Fiyat ($)", value=1.0)
+        hacim_limit = c2.number_input("Min Hacim", value=500000)
+        rsi_sinir = c3.slider("RSI Sınırı (Dipten Dönüş İçin)", 0, 100, 30)
 
-        if not babo_df.empty:
-            babo_df['PUAN'] = babo_df.apply(puanla, axis=1)
-            st.dataframe(babo_df[['Hisse', 'Fiyat', 'PUAN', 'RSI', 'VWAP']].sort_values(by="PUAN", ascending=False))
-        else:
-            st.warning("Baboş hisseler veritabanında bulunamadı, önce güncelleyin.")
+        tab1, tab2 = st.tabs(["🎯 11 BABOŞ PUANLAMA", "📉 TEKNİK DİPTEN DÖNÜŞ"])
+        
+        with tab1:
+            st.subheader("Seçilmiş 11 Hisse Puan Durumu")
+            babo_df = df[df['Hisse'].isin(BABOS_HISSELER)].copy()
+            
+            def puanla(row):
+                p = 0
+                if row['Fiyat'] > row['VWAP']: p += 40
+                if row['RSI'] > 50: p += 30
+                if row['RSI7'] > row['RSI14']: p += 30
+                return p
 
-    with tab2:
-        st.info(f"Koşul: RSI < {rsi_sinir} VE RSI(7) > RSI(14) (Yukarı Kesim)")
-        if st.button("Teknik Dip Tara"):
-            # Teknik Koşul: RSI < sınır VE RSI(7) yukarı keser RSI(14)
-            sonuc = df[(df['RSI'] < rsi_sinir) & 
-                       (df['RSI7'] > df['RSI14']) & 
-                       (df['Fiyat'] >= fiyat_limit) & 
-                       (df['Hacim'] >= hacim_limit)]
-            st.dataframe(sonuc.sort_values(by="Hacim", ascending=False))
+            if not babo_df.empty:
+                babo_df['PUAN'] = babo_df.apply(puanla, axis=1)
+                st.dataframe(babo_df[['Hisse', 'Fiyat', 'PUAN', 'RSI', 'RSI7', 'RSI14']].sort_values(by="PUAN", ascending=False))
+            else:
+                st.warning("Baboş hisseler listede bulunamadı.")
+
+        with tab2:
+            st.info(f"Koşul: RSI < {rsi_sinir} VE RSI(7) > RSI(14)")
+            if st.button("Teknik Dip Tara"):
+                sonuc = df[(df['RSI'] < rsi_sinir) & 
+                           (df['RSI7'] > df['RSI14']) & 
+                           (df['Fiyat'] >= fiyat_limit) & 
+                           (df['Hacim'] >= hacim_limit)]
+                st.dataframe(sonuc.sort_values(by="Hacim", ascending=False))
+    else:
+        st.error("CSV yapısı hatalı. Lütfen '14.000 HİSSEYİ GÜNCELLE' butonuna basarak verileri yenileyin.")
 else:
-    st.warning("Veritabanı boş, güncelleyin.")
+    st.warning("Veritabanı yok. Önce güncelleyin.")
