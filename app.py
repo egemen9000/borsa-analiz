@@ -1,91 +1,43 @@
 import streamlit as st
 import pandas as pd
-import requests
-import time
 import os
 
-st.set_page_config(page_title="14K Hisse Sinyal Avcısı", layout="wide")
+st.header("📊 Mevcut Veritabanı Durumu")
 
-def get_tv_data_full(offset):
-    url = "https://scanner.tradingview.com/america/scan"
-    # Sadece en gerekli kolonları istiyoruz (Hata almamak için)
-    payload = {
-        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
-        "options": {"lang": "en"},
-        "markets": ["america"],
-        "columns": [
-            "name", 
-            "close", 
-            "Relative.Strength.Index.7",      # Bugün RSI7
-            "Relative.Strength.Index.14",     # Bugün RSI14
-            "Relative.Strength.Index.7[1]",   # Dün RSI7
-            "Relative.Strength.Index.14[1]",  # Dün RSI14
-            "volume"
-        ], 
-        "sort": {"sortBy": "volume", "sortOrder": "desc"},
-        "range": [offset, offset + 1000]
-    }
-    try:
-        res = requests.post(url, json=payload, timeout=20)
-        if res.status_code == 200:
-            return res.json().get('data', [])
-        return None
-    except:
-        return None
+# Dosya adını senin önceki kodlarda kullandığın isme göre kontrol ediyoruz
+dosya_adi = "ana_veritabani.csv" if os.path.exists("ana_veritabani.csv") else "canli_veriler.csv"
 
-st.title("🏹 Tüm ABD Hisseleri (14.212) - RSI Yukarı Keser")
-
-if st.button("🚀 TÜM PİYASAYI TARA (14.212 HİSSE)"):
-    found_signals = []
-    status_text = st.empty()
-    bar = st.progress(0)
+if os.path.exists(dosya_adi):
+    df_vt = pd.read_csv(dosya_adi)
     
-    # 15.000'e kadar tüm piyasayı süpürüyoruz
-    for i in range(0, 16000, 1000):
-        status_text.warning(f"📡 Tarama Yapılıyor: {i} - {i+1000}...")
-        batch = get_tv_data_full(i)
-        
-        if batch:
-            for item in batch:
-                d = item.get('d', [])
-                # d[2]: Bugün RSI7, d[3]: Bugün RSI14, d[4]: Dün RSI7, d[5]: Dün RSI14
-                
-                # SIFIR HESAPLAMA - Sadece Karşılaştırma
-                bugun7, bugun14 = d[2], d[3]
-                dun7, dun14 = d[4], d[5]
-                
-                # --- YUKARI KESER ŞARTI (CROSSOVER) ---
-                if (dun7 is not None and dun14 is not None and bugun7 is not None and bugun14 is not None):
-                    if (dun7 <= dun14) and (bugun7 > bugun14) and (bugun14 < 30):
-                        found_signals.append({
-                            "Hisse": item.get('s', '').split(":")[1],
-                            "Fiyat": d[1],
-                            "RSI7_Bugun": round(bugun7, 2),
-                            "RSI14_Bugun": round(bugun14, 2),
-                            "RSI7_Dun": round(dun7, 2),
-                            "RSI14_Dun": round(dun14, 2),
-                            "Hacim": d[6]
-                        })
-        elif batch == []: 
-            break
-        
-        bar.progress(min((i + 1000) / 15000, 1.0))
-        time.sleep(0.4) # API'yi küstürme
-        
-    status_text.empty()
+    # Üst Bilgiler
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Toplam Hisse Sayısı", len(df_vt))
+    col2.metric("Dolu Sütunlar", len(df_vt.columns))
+    col3.info(f"Dosya Adı: {dosya_adi}")
+
+    st.divider()
+
+    # Arama ve Filtreleme Özelliği
+    arama = st.text_input("🔍 Veritabanında Hisse Ara (Örn: TSLA, AAPL):").upper()
     
-    if found_signals:
-        df_final = pd.DataFrame(found_signals).drop_duplicates(subset=['Hisse'])
-        st.success(f"🎯 14.212 Hisse tarandı! Tam bugün kesişen {len(df_final)} hisse bulundu.")
-        st.dataframe(df_final.sort_values(by="Hacim", ascending=False), use_container_width=True)
-        
-        # Sonuçları kaydet
-        df_final.to_csv("bulunan_sinyaller.csv", index=False)
+    if arama:
+        filtreli_df = df_vt[df_vt['Hisse'].str.contains(arama, na=False)]
+        st.subheader(f"'{arama}' İçin Sonuçlar")
+        st.dataframe(filtreli_df, use_container_width=True)
     else:
-        st.error("Şu an tam kesişim anında olan hisse yok baboş!")
+        st.subheader("📋 Tüm Veritabanı (İlk 500 Satır)")
+        # Performans için ilk 500 satırı gösteriyoruz, istersen hepsine bakabilirsin
+        st.dataframe(df_vt.head(500), use_container_width=True)
 
-st.divider()
-
-if os.path.exists("bulunan_sinyaller.csv"):
-    st.subheader("📂 Son Bulunan Sinyaller")
-    st.dataframe(pd.read_csv("bulunan_sinyaller.csv"))
+    # İndirme Butonu (Lazım olursa diye)
+    csv = df_vt.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Mevcut VT'yi CSV Olarak Bilgisayara İndir",
+        data=csv,
+        file_name="mevcut_borsa_vt.csv",
+        mime="text/csv",
+    )
+else:
+    st.error("⚠️ Şu an sistemde kayıtlı bir veritabanı bulunamadı!")
+    st.info("Lütfen önce 'TÜM PİYASAYI İNDİR' butonuna basarak 14.212 hisseyi sisteme kaydet.")
