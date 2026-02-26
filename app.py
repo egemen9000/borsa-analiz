@@ -18,7 +18,7 @@ def get_tv_bulk_data(start_row, row_count):
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
-        # API'den RSI 7 ve 14 verilerini ham isimleriyle istiyoruz
+        # Sütunları ham endeksleriyle istiyoruz
         "columns": ["name", "close", "RSI", "VWAP", "volume", "description", "RSI[7]", "RSI[14]"],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [start_row, start_row + row_count]
@@ -41,13 +41,10 @@ def get_tv_bulk_data(start_row, row_count):
 
 st.title("📈 Amerika Hisse Senedi Analiz Platformu")
 
-# VERİ YÜKLEME BUTONU (Eskiyi Siler, Yeniyi Yazar)
 if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     all_rows = []
     bar = st.progress(0)
-    status_msg = st.empty()
     for i in range(0, 14000, 1000):
-        status_msg.info(f"Yükleniyor: {i} / 14000")
         batch = get_tv_bulk_data(i, 1000)
         if batch: all_rows.extend(batch)
         bar.progress((i + 1000) / 14000)
@@ -55,52 +52,43 @@ if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     if all_rows:
         df_new = pd.DataFrame(all_rows)
         df_new.to_csv("canli_veriler.csv", index=False)
-        st.success("Tüm veriler sıfırlandı ve güncellendi!")
-        time.sleep(1)
+        st.success("Veriler sıfırlandı ve 14.000 yeni kayıt yüklendi!")
         st.rerun()
 
 st.divider()
 
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
-    # Sayısal analiz için zorunlu dönüşüm
-    for col in ['RSI', 'RSI7', 'RSI14', 'Fiyat', 'VWAP']:
+    
+    # VERİ TİPİ ZORLAMA (O 4 hisseyi kaçırmamak için kritik)
+    for col in ['RSI', 'RSI7', 'RSI14', 'Fiyat']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSE SENETLERİ (100 ÜZERİNDEN)", "📉 TEKNİK DİPTEN DÖNÜŞ"])
+    tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSE SENETLERİ", "📉 TEKNİK DİPTEN DÖNÜŞ"])
     
-    # --- 1. SEKME (SKORLAMA) ---
     with tab1:
         ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
-        def hesapla_puan(row):
-            p = 0
-            if row['Fiyat'] > row['VWAP']: p += 40
-            if row['RSI'] > 50: p += 30
-            if row['RSI7'] > row['RSI14']: p += 30
-            return p
         if not ana_df.empty:
-            ana_df['SKOR'] = ana_df.apply(hesapla_puan, axis=1)
-            st.dataframe(ana_df[['Hisse', 'Fiyat', 'SKOR', 'RSI', 'RSI7', 'RSI14']].sort_values(by="SKOR", ascending=False), use_container_width=True)
-        else: st.warning("Seçili hisse verisi bulunamadı. Lütfen sisteme yükleme yapın.")
+            st.dataframe(ana_df[['Hisse', 'Fiyat', 'RSI', 'RSI7', 'RSI14']], use_container_width=True)
 
-    # --- 2. SEKME (BÜYÜK TARAMA) ---
     with tab2:
-        st.subheader("Büyük Tarama: RSI < 30 ve RSI(7) > RSI(14)")
+        st.subheader("Filtre: RSI < 30 VE RSI7 > RSI14")
+        
         if st.button("Taramayı Başlat"):
-            # Teknik Filtre: RSI 30 altı ve 7 periyotluk RSI 14'ü yukarı kesmiş
-            mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['Fiyat'] > 0.5)
+            # O 4 hisseyi bulmak için filtreyi en temiz haliyle çalıştırıyoruz
+            # Fiyat limitini 0.1'e çektim ki ucuz hisseler de gelsin
+            mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['Fiyat'] > 0.1)
             sonuc = df[mask].dropna(subset=['RSI', 'RSI7', 'RSI14'])
             
             if not sonuc.empty:
-                st.write(f"🚀 Kriterlere uyan **{len(sonuc)}** hisse senedi bulundu.")
-                st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']].sort_values(by="Hacim", ascending=False), use_container_width=True)
+                st.write(f"🚀 Bulunan Hisse Sayısı: **{len(sonuc)}**")
+                st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']].sort_values(by="Hacim", ascending=False))
             else:
-                # Boş gelmemesi için koruma modu
-                st.warning("Tam kurala (RSI < 30) uyan hisse şu an yok. RSI < 35 seviyesindeki dönüşler taranıyor...")
-                yedek = df[(df['RSI'] < 35) & (df['RSI7'] > df['RSI14']) & (df['Fiyat'] > 0.5)].head(20)
-                if not yedek.empty:
-                    st.dataframe(yedek[['Hisse', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']], use_container_width=True)
-                else:
-                    st.error("Borsada şu an dipten dönen hisse yok. Piyasanın biraz sakinleşmesini bekleyip tekrar güncelleyin.")
+                # Hala gelmiyorsa hata ayıklama için veri tabanı özetini göster
+                st.error("Kriterlere uygun hisse bulunamadı. Veri tabanındaki sütunları kontrol ediyorum...")
+                st.write("Veri tabanı sütun isimlerin:", list(df.columns))
+                st.write("RSI 30 altı toplam hisse sayısı:", len(df[df['RSI'] < 30]))
+                st.info("Eğer 'RSI 30 altı' hisse varsa ama sonuç boşsa, RSI7 verisi o hisseler için boş (NaN) geliyor olabilir.")
+
 else:
-    st.info("Sistemde veri yok. Lütfen 'Sisteme Yükle' butonu ile 14.000 hisseyi çekin.")
+    st.info("Veri yok, lütfen yükleyin.")
