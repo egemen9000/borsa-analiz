@@ -92,8 +92,8 @@ if os.path.exists("canli_veriler.csv"):
         sinyal = df[
             (df['RSI7'] > df['RSI14']) &
             (df['RSI14'] < 30) &
-            (df['Fiyat'] > df['VWAP']) &
-            (df['Hacim'] > 2 * ortalama_hacim)
+            #(df['Fiyat'] > df['VWAP']) &
+            #(df['Hacim'] > 2 * ortalama_hacim)
         ].copy()
 
         if not sinyal.empty:
@@ -117,3 +117,4 @@ if os.path.exists("canli_veriler.csv"):
 
 else:
     st.warning("Veritabanı boş. Lütfen yukarıdaki butona basarak verileri çekin.")
+
