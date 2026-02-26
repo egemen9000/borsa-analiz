@@ -1,83 +1,83 @@
 import streamlit as st
-from tradingview_ta import TA_Handler, Interval
 import pandas as pd
-import time
-import random
-import os
+import requests
+import json
 
-st.set_page_config(page_title="ABD Borsa Veri Havuzu", layout="wide")
+st.set_page_config(page_title="Borsa Veri Bankası", layout="wide")
 
-# Daha küçük, seçkin bir liste ile başlayalım (Blok riskini azaltmak için)
-SEMBOLLER = ['NVDA', 'AAPL', 'TSLA', 'AMD', 'MSFT', 'AMZN', 'GOOGL', 'META']
-
-def veri_cek_hayalet(sembol):
-    """TradingView'i uyutarak veri çeker"""
+def get_tradingview_data():
+    """TradingView Screener API kullanarak toplu veri çeker (Tek sorguda 100+ hisse)"""
+    url = "https://scanner.tradingview.com/america/scan"
+    
+    # 14.000 hisse içinden en hacimli ve önemli olanları süzmek için filtre
+    payload = {
+        "filter": [
+            {"left": "change", "operation": "nempty"},
+            {"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]},
+            {"left": "subtype", "operation": "in_range", "right": ["common", "foreign-issuer", ""]},
+            {"left": "exchange", "operation": "in_range", "right": ["AMEX", "NASDAQ", "NYSE"]}
+        ],
+        "options": {"lang": "en"},
+        "markets": ["america"],
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["logoid", "name", "close", "change", "RSI", "VWAP", "EMA20", "volume", "description", "type", "subtype", "update_mode"],
+        "sort": {"sortBy": "volume", "sortOrder": "desc"}, # En yüksek hacimliler gelsin
+        "range": [0, 1000] # Tek seferde ilk 1000 hisseyi alıyoruz
+    }
+    
     try:
-        # Gerçek bir insan gibi rastgele bekle (2 ile 5 saniye arası)
-        time.sleep(random.uniform(2.5, 5.2))
-        
-        handler = TA_Handler(
-            symbol=sembol,
-            screener="america",
-            exchange="",
-            interval=Interval.INTERVAL_1_DAY,
-            timeout=25
-        )
-        analiz = handler.get_analysis()
-        if analiz and analiz.indicators:
-            ind = analiz.indicators
-            return {
-                "Hisse": sembol,
-                "Fiyat": ind.get("close"),
-                "RSI": ind.get("RSI"),
-                "VWAP": ind.get("VWAP"),
-                "Zaman": time.strftime('%H:%M:%S')
-            }
-    except:
-        return None
-    return None
+        response = requests.post(url, json=payload, timeout=20)
+        if response.status_code == 200:
+            data = response.json()
+            rows = []
+            for item in data['data']:
+                d = item['d']
+                rows.append({
+                    "Hisse": item['s'].split(":")[1],
+                    "İsim": d[8],
+                    "Fiyat": d[2],
+                    "Hacim": d[7],
+                    "RSI": d[4],
+                    "VWAP": d[5],
+                    "EMA20": d[6]
+                })
+            return pd.DataFrame(rows)
+    except Exception as e:
+        st.error(f"Screener hatası: {e}")
+    return pd.DataFrame()
 
-st.title("🛡️ Hayalet Modu Veri Merkezi")
+st.title("🏦 ABD Borsası Dev Veri Bankası")
 
-if st.button("🚀 VERİLERİ SESSİZCE ÇEK VE KAYDET"):
-    tum_veriler = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for idx, s in enumerate(SEMBOLLER):
-        status_text.text(f"🔍 {s} taranıyor... (İnsansı bekleme devrede)")
-        veri = veri_cek_hayalet(s)
-        if veri:
-            tum_veriler.append(veri)
-        progress_bar.progress((idx + 1) / len(SEMBOLLER))
-    
-    if tum_veriler:
-        df_yeni = pd.DataFrame(tum_veriler)
-        df_yeni.to_csv("canli_veriler.csv", index=False)
-        st.success(f"✅ {len(tum_veriler)} hisse başarıyla kaydedildi!")
+if st.button("🚀 1000 HİSSEYİ TEK SEFERDE ÇEK"):
+    df_scan = get_tradingview_data()
+    if not df_scan.empty:
+        # Veriyi kalıcı olarak kaydet
+        df_scan.to_csv("canli_veriler.csv", index=False)
+        st.success(f"✅ {len(df_scan)} dev hisse verisi başarıyla indirildi!")
         st.rerun()
     else:
-        st.error("❌ TradingView hala bizi blokluyor. IP'nin soğuması için 15 dakika beklemelisin.")
+        st.error("⚠️ Toplu çekim bile şu an engelleniyor. Lütfen 30 dk bekleyip tekrar deneyin.")
 
 st.divider()
 
-# Dosya kontrolü ve Hata yönetimi
+# Kayıtlı veri varsa göster ve analiz et
+import os
 if os.path.exists("canli_veriler.csv") and os.path.getsize("canli_veriler.csv") > 0:
-    try:
-        df = pd.read_csv("canli_veriler.csv")
-        st.subheader(f"📂 Kayıtlı Veriler ({len(df)} Hisse)")
-        st.dataframe(df, use_container_width=True)
+    df = pd.read_csv("canli_veriler.csv")
+    st.write(f"📂 Veritabanında {len(df)} hisse hazır bekliyor.")
+    
+    t1, t2 = st.tabs(["🚀 TREND ANALİZİ", "📉 DİPTEN DÖNÜŞ"])
+    
+    with t1:
+        # VWAP üstü ve RSI > 50 olanları filtrele
+        trend = df[(df['Fiyat'] > df['VWAP']) & (df['RSI'] > 50)].sort_values(by="Hacim", ascending=False)
+        st.subheader("Güçlü Trend Hisseleri")
+        st.dataframe(trend, use_container_width=True)
         
-        # Analiz Sekmeleri
-        t1, t2 = st.tabs(["🎯 STRATEJİ", "📉 DİP"])
-        with t1:
-            if 'Fiyat' in df.columns and 'VWAP' in df.columns:
-                f = df[(df['Fiyat'] > df['VWAP']) & (df['RSI'] > 50)]
-                st.dataframe(f)
-        with t2:
-            if 'RSI' in df.columns:
-                st.dataframe(df[df['RSI'] < 30])
-    except pd.errors.EmptyDataError:
-        st.warning("⚠️ Veri dosyası oluşturuldu ama içi boş. Lütfen tekrar tarama yapın.")
+    with t2:
+        # RSI < 30 olanları filtrele
+        dip = df[df['RSI'] < 30].sort_values(by="RSI")
+        st.subheader("Dipten Dönüş Sinyalleri")
+        st.dataframe(dip, use_container_width=True)
 else:
-    st.info("💡 Henüz veri yok. Yukarıdaki butona basarak taramayı başlatın.")
+    st.info("Henüz veri indirilmemiş. Yukarıdaki butona basarak 1000 hisselik dev veri setini çekin.")
