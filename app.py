@@ -6,7 +6,6 @@ import os
 
 st.set_page_config(page_title="Hisse Pro: VT ve Kesişim", layout="wide")
 
-# --- TRADINGVIEW VERİ ÇEKME FONKSİYONU ---
 def get_tv_raw_data(offset):
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
@@ -30,7 +29,7 @@ def get_tv_raw_data(offset):
     except:
         return None
 
-st.title("🛡️ Borsa Analiz Merkezi v2")
+st.title("🛡️ Borsa Analiz Merkezi v3")
 
 # --- 1. BÖLÜM: VERİTABANI YÖNETİMİ ---
 st.header("📂 1. Veritabanı (VT) İşlemleri")
@@ -49,12 +48,13 @@ with col1:
                 for item in batch:
                     d = item.get('d', [])
                     all_data.append({
-                        "Hisse": item.get('s', '').split(":")[1],
+                        "Hisse": item.get('s', '').split(":")[1] if ":" in item.get('s', '') else item.get('s', ''),
                         "Fiyat": d[1], "RSI7": d[2], "RSI14": d[3],
                         "RSI7_Dun": d[4], "RSI14_Dun": d[5],
                         "Hacim": d[6], "Isim": d[7]
                     })
-            elif batch == []: break
+            elif batch == []: 
+                break
             progress.progress(min((i + 1000) / 15000, 1.0))
             time.sleep(0.6)
             
@@ -62,13 +62,14 @@ with col1:
             df_vt = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
             df_vt.to_csv("ana_veritabani.csv", index=False)
             st.success(f"✅ {len(df_vt)} hisse veritabanına kaydedildi!")
+            st.rerun()
 
 with col2:
     if os.path.exists("ana_veritabani.csv"):
         df_load = pd.read_csv("ana_veritabani.csv")
-        st.info(f"💾 Mevcut VT: {len(df_load)} Hisse")
+        st.info(f"💾 Mevcut VT: {len(df_load)} Hisse Kayıtlı")
     else:
-        st.error("⚠️ Veritabanı bulunamadı, lütfen indirin.")
+        st.error("⚠️ Veritabanı boş, lütfen önce indirin.")
 
 st.divider()
 
@@ -79,25 +80,26 @@ if st.button("🔍 VT ÜZERİNDEN KESİŞİMLERİ BUL"):
     if os.path.exists("ana_veritabani.csv"):
         df = pd.read_csv("ana_veritabani.csv")
         
-        # --- KURAL: YUKARI KESER VE RSI14 < 30 ---
-        # Mantık: (Dün 7 < 14) ve (Bugün 7 > 14) ve (Bugün 14 < 30)
-        mask = (df['RSI7_Dun'] <= df['RSI14_Dun']) & \
-               (df['RSI7'] > df['RSI14']) & \
-               (df['RSI14'] < 30)
-        
+        # Sayısallaştırma
+        for col in ['RSI7', 'RSI14', 'RSI7_Dun', 'RSI14_Dun']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Kesişim Mantığı: Dün (7 <= 14) ve Bugün (7 > 14) ve Bugün (14 < 30)
+        mask = (df['RSI7_Dun'] <= df['RSI14_Dun']) & (df['RSI7'] > df['RSI14']) & (df['RSI14'] < 30)
         sinyal_listesi = df[mask].copy()
         
         if not sinyal_listesi.empty:
             st.success(f"🎯 Kurala uyan {len(sinyal_listesi)} taze sinyal yakalandı!")
-            st.dataframe(sinyal_listesi.sort_values(by="Hacim", ascending=False))
+            st.dataframe(sinyal_listesi.sort_values(by="Hacim", ascending=False), use_container_width=True)
         else:
-            st.warning("⚠️ Veritabanındaki hisseler arasında şu an tam kesişme anında olan yok.")
-                else:
+            st.warning("⚠️ Şu an tam kesişme anında (cross) olan hisse bulunamadı.")
+    else:
         st.error("Önce veritabanını indirmen lazım aşko!")
 
 st.divider()
 
 # --- 3. BÖLÜM: HAM VERİ ---
 if os.path.exists("ana_veritabani.csv"):
-    with st.expander("📂 Tüm Veritabanını Gör"):
-        st.dataframe(pd.read_csv("ana_veritabani.csv"))
+    with st.expander("📂 Tüm Veritabanını Gör / Arama Yap"):
+        df_full = pd.read_csv("ana_veritabani.csv")
+        st.dataframe(df_full, use_container_width=True)
