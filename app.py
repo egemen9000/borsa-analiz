@@ -41,30 +41,32 @@ def get_tv_bulk_data(start_row, row_count):
 
 st.title("📈 Amerika Hisse Senedi Analiz Platformu")
 
-# 1. VERİ GÜNCELLEME
+# 1. VERİ GÜNCELLEME (PROGRESS BARLI)
 if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     all_rows = []
     bar = st.progress(0)
     status_msg = st.empty()
     for i in range(0, 14000, 1000):
-        status_msg.info(f"Veriler işleniyor... {i}")
+        status_msg.info(f"Veriler çekiliyor: {i} / 14000")
         batch = get_tv_bulk_data(i, 1000)
         if batch: all_rows.extend(batch)
         bar.progress((i + 1000) / 14000)
         time.sleep(0.4)
     if all_rows:
         pd.DataFrame(all_rows).to_csv("canli_veriler.csv", index=False)
+        st.success("Veritabanı güncellendi!")
         st.rerun()
 
 st.divider()
 
-# 2. ANALİZ VE TABLOLAR
+# 2. ANALİZ PANELİ
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
     
     tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSE SENETLERİ (100 ÜZERİNDEN)", "📉 TEKNİK DİPTEN DÖNÜŞ"])
     
     with tab1:
+        # Belirlediğin 11 hisseyi filtrele
         ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
         
         def hesapla_skor(row):
@@ -80,15 +82,21 @@ if os.path.exists("canli_veriler.csv"):
             ana_df['SKOR'] = ana_df.apply(hesapla_skor, axis=1)
             st.dataframe(ana_df[['Hisse', 'Fiyat', 'SKOR', 'RSI', 'RSI7', 'RSI14']].sort_values(by="SKOR", ascending=False), use_container_width=True)
         else:
-            st.warning("Veritabanı güncel değil, lütfen yükleme yapın.")
+            st.warning("Seçili hisseler bulunamadı, lütfen veritabanını güncelleyin.")
 
     with tab2:
-        st.info("Kriter: RSI < 30 VE RSI(7) > RSI(14)")
+        st.subheader("RSI Kesişim Taraması")
+        st.info("Kural: RSI < 30 VE RSI(7) > RSI(14)")
+        
+        
         
         if st.button("Taramayı Başlat"):
-            # Sabit kriterlerle tarama (Kullanıcı girişi kaldırıldı)
-            sonuc = df[(df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['Fiyat'] > 1)]
-            st.write(f"Bulunan Hisse Sayısı: {len(sonuc)}")
+            # Sabitlenmiş Kurallar: RSI 30 altı ve 7 periyotluk RSI 14'ü yukarı kesmiş (Momentum dönüşü)
+            sonuc = df[(df['RSI'] < 30) & 
+                       (df['RSI7'] > df['RSI14']) & 
+                       (df['Fiyat'] > 1)]
+            
+            st.write(f"Kritere uyan **{len(sonuc)}** hisse senedi tespit edildi.")
             st.dataframe(sonuc.sort_values(by="Hacim", ascending=False), use_container_width=True)
 else:
-    st.info("Lütfen önce verileri yükleyin.")
+    st.info("Sistemde veri bulunamadı. Lütfen önce 'Sisteme Yükle' butonunu kullanın.")
