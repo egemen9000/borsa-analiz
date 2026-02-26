@@ -4,7 +4,7 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title="Analiz Platformu", layout="wide")
+st.set_page_config(page_title="Hisse Analiz Platformu", layout="wide")
 
 # 1. SEKME İÇİN SEÇİLMİŞ HİSSELER
 ANA_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
@@ -18,7 +18,7 @@ def get_tv_bulk_data(start_row, row_count):
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
-        # Harf uyuşmazlığı riskine karşı API'nin beklediği tam teknik isimleri kullanıyoruz
+        # İsteğin üzerine tam olarak RSI7 ve RSI14 isimlerini deniyoruz
         "columns": [
             "name", 
             "close", 
@@ -26,8 +26,8 @@ def get_tv_bulk_data(start_row, row_count):
             "VWAP", 
             "volume", 
             "description", 
-            "RSI[7]",   # 7 Periyotluk RSI
-            "RSI[20]"   # Senin istediğin 20 Periyotluk RSI
+            "RSI7", 
+            "RSI14"
         ],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [start_row, start_row + row_count]
@@ -36,7 +36,6 @@ def get_tv_bulk_data(start_row, row_count):
         response = requests.post(url, json=payload, timeout=30)
         if response.status_code == 200:
             data = response.json()
-            # d[6] -> RSI[7], d[7] -> RSI[20]
             return [{"Hisse": item['s'].split(":")[1], 
                      "İsim": item['d'][5], 
                      "Fiyat": item['d'][1], 
@@ -44,13 +43,14 @@ def get_tv_bulk_data(start_row, row_count):
                      "VWAP": item['d'][3], 
                      "Hacim": item['d'][4],
                      "RSI7": item['d'][6], 
-                     "RSI20": item['d'][7]} 
+                     "RSI14": item['d'][7]} 
                     for item in data['data']]
     except: return []
     return []
 
-st.title("📈 Kurumsal Hisse Analiz Platformu")
+st.title("📈 Amerika Hisse Senedi Analiz Platformu")
 
+# VERİ GÜNCELLEME BUTONU
 if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     all_rows = []
     bar = st.progress(0)
@@ -58,44 +58,44 @@ if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
         batch = get_tv_bulk_data(i, 1000)
         if batch: all_rows.extend(batch)
         bar.progress((i + 1000) / 14000)
-        time.sleep(0.5)
+        time.sleep(0.4)
     if all_rows:
-        # CSV Sütun İsimlerini Sabitliyoruz
         df_new = pd.DataFrame(all_rows)
+        # Sütun isimlerini CSV'de netleştiriyoruz
         df_new.to_csv("canli_veriler.csv", index=False)
-        st.success("Veritabanı RSI[7] ve RSI[20] verileriyle güncellendi!")
+        st.success("Veritabanı RSI7 ve RSI14 formatıyla yenilendi!")
         st.rerun()
 
 st.divider()
 
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
-    # Sayısal veri dönüşümü
-    for col in ['RSI', 'RSI7', 'RSI20', 'Fiyat']:
+    # Sayısal veri kontrolü
+    for col in ['RSI', 'RSI7', 'RSI14', 'Fiyat']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSELER", "📉 TEKNİK DİPTEN DÖNÜŞ"])
     
     with tab1:
+        # 1. Sekme: Puanlama (Mevcut mantık korundu)
         ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
         if not ana_df.empty:
-            st.dataframe(ana_df[['Hisse', 'Fiyat', 'RSI', 'RSI7', 'RSI20']], use_container_width=True)
+            st.dataframe(ana_df[['Hisse', 'Fiyat', 'RSI', 'RSI7', 'RSI14']], use_container_width=True)
 
     with tab2:
-        st.subheader("Filtre: RSI < 30 ve RSI(7) > RSI(20)")
+        st.subheader("Filtre: RSI < 30 ve RSI7 > RSI14")
         
         if st.button("Taramayı Başlat"):
-            # O 4 hisseyi yakalamak için yeni kural (20 periyot)
-            mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI20']) & (df['RSI7'] > 0)
+            # RSI7 ve RSI14 uyuşmazlığını çözmek için kural
+            mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['RSI7'] > 0)
             sonuc = df[mask].copy()
             
             if not sonuc.empty:
-                st.write(f"🚀 Bulunan Hisse Sayısı: **{len(sonuc)}**")
-                st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI20', 'Hacim']].sort_values(by="Hacim", ascending=False))
+                st.write(f"🚀 Kriterlere uyan **{len(sonuc)}** hisse bulundu.")
+                st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']].sort_values(by="Hacim", ascending=False))
             else:
-                st.warning("Bu kriterlere uyan hisse şu an yok. RSI7 veya RSI20 sütunlarının 0 olup olmadığını kontrol et.")
-                # Teşhis için ilk 5 satırı göster
-                st.write("Veritabanı Örneği (İlk 5):", df[['Hisse', 'RSI7', 'RSI20']].head())
-
+                st.error("Kriterlere uygun hisse bulunamadı. Veritabanındaki RSI7/RSI14 değerlerini kontrol edin.")
+                # Hata ayıklama için örnek tablo
+                st.write("Veritabanı Kontrolü (İlk 5 Satır):", df[['Hisse', 'RSI7', 'RSI14']].head())
 else:
-    st.info("Lütfen verileri güncelleyin.")
+    st.info("Sistemde veri bulunamadı. Lütfen '14.000 HİSSEYİ SİSTEME YÜKLE' butonuna basın.")
