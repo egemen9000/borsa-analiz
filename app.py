@@ -2,9 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import os
 
-st.set_page_config(page_title="Hisse Pro: VT Merkezi", layout="wide")
+st.set_page_config(page_title="Borsa Analiz Pro", layout="wide")
+
+# Veriyi hafızada (Session State) tutmak için başlangıç ayarı
+if 'ana_veri' not in st.session_state:
+    st.session_state['ana_veri'] = None
 
 def get_tv_full_data(offset):
     url = "https://scanner.tradingview.com/america/scan"
@@ -28,14 +31,16 @@ def get_tv_full_data(offset):
 
 st.title("🛡️ Borsa VT ve Sinyal Paneli")
 
-# --- BUTONLAR BÖLÜMÜ ---
+# --- BUTONLAR ---
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    if st.button("🔴 1. TÜM PİYASAYI İNDİR (DÜN+BUGÜN)"):
+    if st.button("🔴 1. TÜM PİYASAYI İNDİR"):
         all_data = []
         bar = st.progress(0)
+        status = st.empty()
         for i in range(0, 16000, 1000):
+            status.warning(f"📡 İndiriliyor: {i} - {i+1000}")
             batch = get_tv_full_data(i)
             if batch:
                 for item in batch:
@@ -47,10 +52,12 @@ with col1:
                     })
             elif batch == []: break
             bar.progress(min((i + 1000) / 16000, 1.0))
-            time.sleep(0.4)
+            time.sleep(0.3)
+        
         if all_data:
-            pd.DataFrame(all_data).to_csv("ana_veritabani.csv", index=False)
-            st.success("✅ Veritabanı Güncellendi!")
+            # VERİYİ HAFIZAYA YAZIYORUZ (Silinmez!)
+            st.session_state['ana_veri'] = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
+            st.success(f"✅ {len(st.session_state['ana_veri'])} Hisse Hafızaya Alındı!")
 
 with col2:
     view_vt = st.button("📂 2. MEVCUT VERİTABANINI GÖRÜNTÜLE")
@@ -62,32 +69,31 @@ st.divider()
 
 # --- AKSİYONLAR ---
 
-# 1. VT Görüntüleme Butonuna Basıldıysa
+# 1. Görüntüleme: Hafızadaki veriyi kontrol et
 if view_vt:
-    if os.path.exists("ana_veritabani.csv"):
-        df_vt = pd.read_csv("ana_veritabani.csv")
-        st.subheader(f"📋 Kayıtlı Veritabanı ({len(df_vt)} Hisse)")
-        st.dataframe(df_vt, use_container_width=True)
+    if st.session_state['ana_veri'] is not None:
+        st.subheader("📋 Aktif Veritabanı")
+        st.dataframe(st.session_state['ana_veri'], use_container_width=True)
     else:
-        st.error("⚠️ Veritabanı dosyası bulunamadı! Önce 1. butona bas.")
+        st.error("⚠️ Hafıza boş! Önce 1. butona basıp verileri çekmelisin baboş.")
 
-# 2. Kesişim Butonuna Basıldıysa
+# 2. Kural Taraması: Hafızadaki veri üzerinden süz
 if find_cross:
-    if os.path.exists("ana_veritabani.csv"):
-        df = pd.read_csv("ana_veritabani.csv")
-        # Sayısallaştırma
+    if st.session_state['ana_veri'] is not None:
+        df = st.session_state['ana_veri'].copy()
+        
+        # Sayısallaştırma (Hata almamak için)
         for c in ['RSI7','RSI14','RSI7_Dun','RSI14_Dun']:
             df[c] = pd.to_numeric(df[c], errors='coerce')
         
-        # --- KURAL: Dün (7 <= 14) ve Bugün (7 > 14) ve Bugün (14 < 30) ---
+        # KURAL: Dün (7 <= 14) ve Bugün (7 > 14) ve Bugün (14 < 30)
         mask = (df['RSI7_Dun'] <= df['RSI14_Dun']) & (df['RSI7'] > df['RSI14']) & (df['RSI14'] < 30)
-        crossover = df[mask].copy()
+        crossover = df[mask]
         
         if not crossover.empty:
             st.success(f"🎯 Tam bugün kesişen {len(crossover)} hisse yakalandı!")
-            
             st.dataframe(crossover.sort_values(by="Hacim", ascending=False), use_container_width=True)
         else:
-            st.warning("⚠️ VT'de şu an tam kesişme anında (cross) olan hisse yok baboş.")
+            st.warning("⚠️ Hafızadaki 14.212 hisse içinde tam şu an kesişen yok.")
     else:
-        st.error("Önce veritabanını indirmen lazım!")
+        st.error("⚠️ Önce verileri indirmen lazım!")
