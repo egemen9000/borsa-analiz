@@ -4,22 +4,20 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title="RSI Crossover Analiz", layout="wide")
+st.set_page_config(page_title="Hisse Pro: VT ve Kesişim", layout="wide")
 
-def get_tv_crossover_data(offset):
+# --- TRADINGVIEW VERİ ÇEKME FONKSİYONU ---
+def get_tv_raw_data(offset):
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
         "options": {"lang": "en"},
         "markets": ["america"],
         "columns": [
-            "name", 
-            "close", 
-            "Relative.Strength.Index.7",      # Bugün RSI7
-            "Relative.Strength.Index.14",     # Bugün RSI14
-            "Relative.Strength.Index.7[1]",   # Dün RSI7 (Kesişim kontrolü için)
-            "Relative.Strength.Index.14[1]",  # Dün RSI14 (Kesişim kontrolü için)
-            "volume"
+            "name", "close", 
+            "Relative.Strength.Index.7", "Relative.Strength.Index.14",
+            "Relative.Strength.Index.7[1]", "Relative.Strength.Index.14[1]",
+            "volume", "description"
         ], 
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [offset, offset + 1000]
@@ -32,58 +30,74 @@ def get_tv_crossover_data(offset):
     except:
         return None
 
-st.title("🏹 RSI(7) Yukarı Keser RSI(14) - Gerçek Sinyal")
+st.title("🛡️ Borsa Analiz Merkezi v2")
 
-if st.button("🔴 KESİŞİMLERİ TARA (14.212 HİSSE)"):
-    all_results = []
-    status = st.empty()
-    
-    for i in range(0, 16000, 1000):
-        status.warning(f"📡 Veri Analiz Ediliyor: {i} - {i+1000}")
-        batch = get_tv_crossover_data(i)
+# --- 1. BÖLÜM: VERİTABANI YÖNETİMİ ---
+st.header("📂 1. Veritabanı (VT) İşlemleri")
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("🔴 TÜM ABD PİYASASINI İNDİR (VT GÜNCELLE)"):
+        all_data = []
+        progress = st.progress(0)
+        status = st.empty()
         
-        if batch:
-            for item in batch:
-                d = item.get('d', [])
-                # Sütun eşleşmeleri:
-                # d[2]: RSI7(Bugün), d[3]: RSI14(Bugün), d[4]: RSI7(Dün), d[5]: RSI14(Dün)
-                
-                bugun_7 = d[2]
-                bugun_14 = d[3]
-                dun_7 = d[4]
-                dun_14 = d[5]
-                
-                # --- YUKARI KESER ŞARTI ---
-                # 1. Dün 7, 14'ün altındaydı (Veya eşitti)
-                # 2. Bugün 7, 14'ün üstüne çıktı
-                # 3. RSI14 hala dip bölgesinde ( < 30 )
-                if (dun_7 <= dun_14) and (bugun_7 > bugun_14) and (bugun_14 < 30):
-                    all_results.append({
+        for i in range(0, 16000, 1000):
+            status.warning(f"📡 İndiriliyor: {i} - {i+1000}")
+            batch = get_tv_raw_data(i)
+            if batch:
+                for item in batch:
+                    d = item.get('d', [])
+                    all_data.append({
                         "Hisse": item.get('s', '').split(":")[1],
-                        "Fiyat": d[1],
-                        "RSI7_Bugün": bugun_7,
-                        "RSI14_Bugün": bugun_14,
-                        "RSI7_Dün": dun_7,
-                        "RSI14_Dün": dun_14,
-                        "Hacim": d[6]
+                        "Fiyat": d[1], "RSI7": d[2], "RSI14": d[3],
+                        "RSI7_Dun": d[4], "RSI14_Dun": d[5],
+                        "Hacim": d[6], "Isim": d[7]
                     })
-        elif batch == []:
-            break
-        time.sleep(0.5)
-    
-    if all_results:
-        df = pd.DataFrame(all_results)
-        df.to_csv("kesisim_verileri.csv", index=False)
-        st.success(f"✅ Tam Kesişim Veren {len(df)} Hisse Bulundu!")
-        st.rerun()
+            elif batch == []: break
+            progress.progress(min((i + 1000) / 15000, 1.0))
+            time.sleep(0.6)
+            
+        if all_data:
+            df_vt = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
+            df_vt.to_csv("ana_veritabani.csv", index=False)
+            st.success(f"✅ {len(df_vt)} hisse veritabanına kaydedildi!")
+
+with col2:
+    if os.path.exists("ana_veritabani.csv"):
+        df_load = pd.read_csv("ana_veritabani.csv")
+        st.info(f"💾 Mevcut VT: {len(df_load)} Hisse")
     else:
-        st.error("Şu an tam kesişme anında olan hisse yok!")
+        st.error("⚠️ Veritabanı bulunamadı, lütfen indirin.")
 
 st.divider()
 
-if os.path.exists("kesisim_verileri.csv"):
-    df = pd.read_csv("kesisim_verileri.csv")
-    st.subheader("🎯 Taze Sinyaller (Bugün Kesişenler)")
-    st.dataframe(df.sort_values(by="Hacim", ascending=False), use_container_width=True)
-else:
-    st.info("Butona basarak taramayı başlat aşko.")
+# --- 2. BÖLÜM: KURAL TARAMASI ---
+st.header("🏹 2. Kesişim Sinyal Taraması")
+
+if st.button("🔍 VT ÜZERİNDEN KESİŞİMLERİ BUL"):
+    if os.path.exists("ana_veritabani.csv"):
+        df = pd.read_csv("ana_veritabani.csv")
+        
+        # --- KURAL: YUKARI KESER VE RSI14 < 30 ---
+        # Mantık: (Dün 7 < 14) ve (Bugün 7 > 14) ve (Bugün 14 < 30)
+        mask = (df['RSI7_Dun'] <= df['RSI14_Dun']) & \
+               (df['RSI7'] > df['RSI14']) & \
+               (df['RSI14'] < 30)
+        
+        sinyal_listesi = df[mask].copy()
+        
+        if not sinyal_listesi.empty:
+            st.success(f"🎯 Kurala uyan {len(sinyal_listesi)} taze sinyal yakalandı!")
+            st.dataframe(sinyal_listesi.sort_values(by="Hacim", ascending=False))
+        else:
+            st.warning("⚠️ Veritabanındaki hisseler arasında şu an tam kesişme anında olan yok.")
+                else:
+        st.error("Önce veritabanını indirmen lazım aşko!")
+
+st.divider()
+
+# --- 3. BÖLÜM: HAM VERİ ---
+if os.path.exists("ana_veritabani.csv"):
+    with st.expander("📂 Tüm Veritabanını Gör"):
+        st.dataframe(pd.read_csv("ana_veritabani.csv"))
