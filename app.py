@@ -5,18 +5,17 @@ import time
 import random
 
 # Sayfa Ayarları
-st.set_page_config(page_title="ABD Borsaları Strateji Bulutu", layout="wide")
+st.set_page_config(page_title="E-Borsa Strateji", layout="wide")
 
 @st.cache_data(ttl=300)
-def veri_cek_final(hisse):
-    # TradingView bazen 'america' yerine 'stock' screener'ında daha rahat cevap verir
+def veri_cek_stabil(hisse):
+    """Farklı screener ve exchange kombinasyonlarıyla veriyi zorlar"""
     denemeler = [
         {"scr": "america", "ex": ""},
         {"scr": "stock", "ex": ""},
         {"scr": "america", "ex": "NASDAQ"},
         {"scr": "america", "ex": "NYSE"}
     ]
-    
     for d in denemeler:
         try:
             handler = TA_Handler(
@@ -26,16 +25,14 @@ def veri_cek_final(hisse):
                 interval=Interval.INTERVAL_1_DAY,
                 timeout=15
             )
-            # Rastgele çok kısa bir bekleme (sunucuyu şaşırtmak için)
-            time.sleep(random.uniform(0.1, 0.3))
-            analiz = handler.get_analysis()
-            if analiz and analiz.indicators:
-                return analiz
+            # Bot korumasını aşmak için mikro bekleme
+            time.sleep(random.uniform(0.1, 0.4))
+            return handler.get_analysis()
         except:
             continue
     return None
 
-st.title("🛡️ ABD Borsaları Strateji Bulutu")
+st.title("🛡️ Borsa Strateji Bulutu")
 
 tab1, tab2 = st.tabs(["🚀 TREND ANALİZİ", "📈 DİPTEN DÖNÜŞ"])
 
@@ -45,7 +42,7 @@ with tab1:
         veriler = []
         progress = st.progress(0)
         for idx, h in enumerate(HISSELER):
-            res = veri_cek_final(h)
+            res = veri_cek_stabil(h)
             if res:
                 ind = res.indicators
                 fiyat = ind.get("close")
@@ -58,36 +55,33 @@ with tab1:
                 if ind.get("MACD.macd") and ind.get("MACD.signal") and ind.get("MACD.macd") > ind.get("MACD.signal"): skor += 10
                 if ind.get("SMA20") and fiyat > ind.get("SMA20"): skor += 15
                 
-                veriler.append({
-                    "Hisse": h, "Fiyat": round(fiyat, 2), "Skor": skor,
-                    "RSI(14)": round(rsi, 2) if rsi else 0, "Sinyal": res.summary.get("RECOMMENDATION")
-                })
-            time.sleep(random.uniform(0.5, 1.2)) # Bot yakalanma riskini azaltır
+                veriler.append({"Hisse": h, "Fiyat": round(fiyat, 2), "Skor": skor, "RSI": round(rsi, 2) if rsi else 0})
+            time.sleep(random.uniform(1.2, 2.5)) # Blok yememek için kritik bekleme
             progress.progress((idx + 1) / len(HISSELER))
-        
         if veriler:
             st.dataframe(pd.DataFrame(veriler).sort_values(by="Skor", ascending=False), use_container_width=True)
-        else:
-            st.error("Bulut IP'leri şu an TradingView tarafından kısıtlanıyor. 5 dakika sonra tekrar deneyin.")
 
 with tab2:
     st.subheader("🔍 Dipten Dönüş Analizi")
-    user_input = st.text_area("Hisseler (Virgülle):", "AAPL, MSFT, NVDA, TSLA, AMZN")
+    user_input = st.text_area("Hisseler (Virgülle):", "AAPL, MSFT, NVDA, TSLA, AMZN, INTU, WDAY, TEAM")
     raw_list = [x.strip().upper() for x in user_input.replace("\n", ",").split(",") if x.strip()]
     
     if st.button("Dipten Dönüş Tara"):
         found = []
-        for symbol in raw_list:
-            res = veri_cek_final(symbol)
+        bar = st.progress(0)
+        for idx, symbol in enumerate(raw_list):
+            res = veri_cek_stabil(symbol)
             if res:
                 ind = res.indicators
                 rsi14 = ind.get("RSI")
                 rsi7 = ind.get("RSI7") or ind.get("RSI[7]")
+                # Senin KRİTER: RSI14 < 30 ve RSI7 > RSI14
                 if rsi14 and rsi14 < 30 and rsi7 and rsi7 > rsi14:
-                    found.append({"Hisse": symbol, "Fiyat": round(ind.get("close"), 2), "RSI(7)": round(rsi7, 2), "RSI(14)": round(rsi14, 2)})
-            time.sleep(random.uniform(0.5, 1.2))
+                    found.append({"Hisse": symbol, "Fiyat": round(ind.get("close"), 2), "RSI(7)": round(rsi7, 2), "RSI(14)": round(rsi14, 2), "Durum": "🔥 DİPTEN DÖNÜŞ"})
+            time.sleep(random.uniform(1.2, 2.5))
+            bar.progress((idx + 1) / len(raw_list))
         
         if found:
             st.dataframe(pd.DataFrame(found), use_container_width=True)
         else:
-            st.warning("Uygun hisse yok veya bağlantı limiti aşıldı.")
+            st.warning("Bu hisseler arasında şu an kriterlere uyan yok veya bağlantı kısıtlandı. Listeyi azaltıp tekrar deneyin.")
