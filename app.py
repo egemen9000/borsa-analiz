@@ -2,18 +2,16 @@ import streamlit as st
 from tradingview_ta import TA_Handler, Interval
 import pandas as pd
 import time
+import os
 
-st.set_page_config(page_title="Dev Veri Merkezi", layout="wide")
+st.set_page_config(page_title="ABD Büyük Veri Merkezi", layout="wide")
 
-# ÖNEMLİ: Hacimli ve popüler hisse listesi (Örnek olarak 50 tane koydum, bunu büyütebilirsin)
-SEMBOLLER = ['AAPL', 'NVDA', 'TSLA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'INTC', 
-             'MU', 'AVGO', 'PLTR', 'BABA', 'PYPL', 'TSM', 'ASML', 'WDC', 'MARA', 'COIN']
+# Örnek listeyi genişletiyoruz
+SEMBOLLER = ['AAPL', 'NVDA', 'TSLA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'INTC', 'PLTR', 'MU']
 
 def toplu_veri_indir():
-    st.info("🔄 14.000 hisse arasından dev veri seti indiriliyor... (Lütfen bekleyin)")
+    st.info("🔄 Veriler indiriliyor... Lütfen bekleyin.")
     tum_veriler = []
-    
-    # İlerleme çubuğu
     progress_bar = st.progress(0)
     
     for idx, sembol in enumerate(SEMBOLLER):
@@ -26,7 +24,7 @@ def toplu_veri_indir():
                 timeout=10
             )
             analiz = handler.get_analysis()
-            if analiz:
+            if analiz and analiz.indicators:
                 ind = analiz.indicators
                 tum_veriler.append({
                     "Hisse": sembol,
@@ -34,46 +32,53 @@ def toplu_veri_indir():
                     "RSI": ind.get("RSI"),
                     "VWAP": ind.get("VWAP"),
                     "EMA20": ind.get("EMA20"),
-                    "SMA50": ind.get("SMA50"),
                     "Zaman": time.strftime('%H:%M:%S')
                 })
-        except:
-            continue
+        except Exception as e:
+            continue # Hata veren hisseyi atla, sistemi durdurma
         
-        # Her 5 sorguda bir kısa mola (Blok yememek için)
-        if idx % 5 == 0:
-            time.sleep(1)
         progress_bar.progress((idx + 1) / len(SEMBOLLER))
     
-    df = pd.DataFrame(tum_veriler)
-    # Veriyi bulutun geçici hafızasına (ve istersen CSV'ye) kaydet
-    df.to_csv("canli_veriler.csv", index=False)
-    return df
+    if not tum_veriler:
+        return pd.DataFrame() # Tamamen boşsa boş dataframe dön
+        
+    return pd.DataFrame(tum_veriler)
 
-st.title("📊 ABD Borsası Büyük Veri Analizörü")
+st.title("📊 ABD Borsası Veri Deposu")
 
-if st.button("🚀 TÜM BORSAYI TARA VE KAYDET"):
-    veri_seti = toplu_veri_indir()
-    st.session_state['veriler'] = veri_seti
-    st.success("✅ Veriler indirildi ve yerel veritabanına kaydedildi!")
+# Buton Alanı
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("🚀 TÜM VERİLERİ YENİLE (GÜNCELLE)"):
+        yeni_df = toplu_veri_indir()
+        if not yeni_df.empty:
+            yeni_df.to_csv("canli_veriler.csv", index=False)
+            st.success("✅ Veriler indirildi ve CSV olarak kaydedildi!")
+            st.rerun() # Sayfayı yenile ki veriler yüklensin
+        else:
+            st.error("❌ Hiçbir veri çekilemedi. TradingView şu an kısıtlıyor olabilir.")
 
-# Analiz Sekmeleri
-if 'veriler' in st.session_state:
-    df = st.session_state['veriler']
+# Veri Yükleme Alanı
+if os.path.exists("canli_veriler.csv"):
+    df = pd.read_csv("canli_veriler.csv")
+    
+    st.write(f"📂 Son Güncelleme: {len(df)} hisse kayıtlı.")
     
     tab1, tab2 = st.tabs(["🎯 STRATEJİ FİLTRESİ", "📉 DİPTEN DÖNÜŞ"])
     
     with tab1:
-        # VWAP üstü ve RSI > 50 olanları saniyeler içinde süz
-        filtre = df[(df['Fiyat'] > df['VWAP']) & (df['RSI'] > 50)]
-        st.subheader("Trendi Güçlü Hisseler")
-        st.write(f"Kriterlere uyan {len(filtre)} hisse bulundu.")
-        st.dataframe(filtre)
-        
+        # Sütunların varlığını kontrol ederek filtreleme yapıyoruz (Hata almamak için)
+        if 'Fiyat' in df.columns and 'VWAP' in df.columns:
+            filtre = df[(df['Fiyat'] > df['VWAP']) & (df['RSI'] > 50)]
+            st.subheader("Trendi Güçlü Hisseler")
+            st.dataframe(filtre, use_container_width=True)
+        else:
+            st.warning("Veri setinde gerekli sütunlar eksik. Lütfen verileri yenileyin.")
+            
     with tab2:
-        # RSI < 30 olanları süz
-        dip_filtre = df[df['RSI'] < 30]
-        st.subheader("Aşırı Satım Bölgesindeki Hisseler")
-        st.dataframe(dip_filtre)
+        if 'RSI' in df.columns:
+            dip_filtre = df[df['RSI'] < 30]
+            st.subheader("Aşırı Satım (Dip) Bölgesi")
+            st.dataframe(dip_filtre, use_container_width=True)
 else:
-    st.warning("Henüz veri indirilmedi. Lütfen yukarıdaki butona basarak taramayı başlatın.")
+    st.warning("Henüz yerel veri dosyası (CSV) bulunamadı. Lütfen 'Tüm Verileri Yenile' butonuna basın.")
