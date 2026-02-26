@@ -39,7 +39,8 @@ def get_tv_bulk_data(start_row, row_count):
                      "VWAP": item['d'][4], 
                      "Hacim": item['d'][5]} 
                     for item in data['data']]
-    except: return []
+    except:
+        return []
     return []
 
 st.title("📈 Şeffaf Hisse Analiz Platformu")
@@ -52,7 +53,8 @@ if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE (VT SIFIRLA)"):
     for i in range(0, 14000, 1000):
         status.text(f"İndiriliyor: {i} / 14000")
         batch = get_tv_bulk_data(i, 1000)
-        if batch: all_rows.extend(batch)
+        if batch:
+            all_rows.extend(batch)
         bar.progress((i + 1000) / 14000)
         time.sleep(0.3)
     if all_rows:
@@ -65,12 +67,19 @@ st.divider()
 
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
+
     # Sayısal dönüşümler
     for col in ['RSI7', 'RSI14', 'Fiyat', 'VWAP', 'Hacim']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # ÜÇÜNCÜ SEKME EKLENDİ
-    tab1, tab2, tab3 = st.tabs(["🎯 ANA HİSSELER", "📉 TEKNİK SİNYAL (7>14)", "📂 TÜM VERİTABANI (HAM VERİ)"])
+    # NaN temizleme
+    df = df.dropna(subset=['RSI7', 'RSI14', 'Fiyat', 'VWAP', 'Hacim'])
+
+    # Ortalama hacim hesaplama
+    ortalama_hacim = df['Hacim'].mean()
+
+    # SEKME OLUŞTURMA
+    tab1, tab2, tab3 = st.tabs(["🎯 ANA HİSSELER", "📉 AKILLI DİP DÖNÜŞ SİNYALİ", "📂 TÜM VERİTABANI (HAM VERİ)"])
     
     with tab1:
         st.subheader("Seçilmiş Dev Şirketler")
@@ -78,20 +87,28 @@ if os.path.exists("canli_veriler.csv"):
         st.dataframe(ana_df, use_container_width=True)
 
     with tab2:
-        st.subheader("RSI(14) < 30 ve RSI(7) > RSI(14) Kesişimi")
-        # Filtreleme
-        sinyal = df[(df['RSI14'] < 30) & (df['RSI7'] > df['RSI14'])].copy()
+        st.subheader("RSI7 > RSI14 • RSI14 < 30 • Fiyat > VWAP • Hacim > 2x Ortalama")
+
+        sinyal = df[
+            (df['RSI7'] > df['RSI14']) &
+            (df['RSI14'] < 30) &
+            (df['Fiyat'] > df['VWAP']) &
+            (df['Hacim'] > 2 * ortalama_hacim)
+        ].copy()
+
         if not sinyal.empty:
-            st.success(f"Tam Sinyal Veren {len(sinyal)} Hisse Bulundu!")
-            st.dataframe(sinyal.sort_values(by="Hacim", ascending=False), use_container_width=True)
+            st.success(f"🔥 Güçlü Sinyal Veren {len(sinyal)} Hisse Bulundu!")
+            st.dataframe(
+                sinyal.sort_values(by="Hacim", ascending=False),
+                use_container_width=True
+            )
         else:
-            st.warning("Bu kriterlere tam uyan hisse şu an yok. Ham veriden RSI7'leri kontrol et.")
+            st.warning("Bu kriterlere uyan hisse şu an yok.")
 
     with tab3:
-        st.subheader("Veritabanındaki Tüm Sütunlar ve Satırlar")
-        st.info(f"Toplam {len(df)} hisse kayıtlı. Sütun isimleri ve içerikleri aşağıdadır:")
-        
-        # ARAMA ÇUBUĞU (O 4 hisseyi ismen aratman için)
+        st.subheader("Veritabanındaki Tüm Satırlar")
+        st.info(f"Toplam {len(df)} hisse kayıtlı.")
+
         ara = st.text_input("Hisse kodu ile ara (Örn: NVDA):").upper()
         if ara:
             st.dataframe(df[df['Hisse'].str.contains(ara, na=False)], use_container_width=True)
