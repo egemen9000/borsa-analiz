@@ -4,7 +4,7 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title="Hisse Analiz Platformu", layout="wide")
+st.set_page_config(page_title="Amerika Analiz Platformu", layout="wide")
 
 # 1. SEKME İÇİN SEÇİLMİŞ HİSSELER
 ANA_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
@@ -18,16 +18,11 @@ def get_tv_bulk_data(start_row, row_count):
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
-        # İsteğin üzerine tam olarak RSI7 ve RSI14 isimlerini deniyoruz
+        # EN GARANTİ KOLON İSİMLERİ (TradingView Teknik Kütüphane İsimleri)
         "columns": [
-            "name", 
-            "close", 
-            "RSI", 
-            "VWAP", 
-            "volume", 
-            "description", 
-            "RSI7", 
-            "RSI14"
+            "name", "close", "RSI", "VWAP", "volume", "description", 
+            "Relative.Strength.Index.7", 
+            "Relative.Strength.Index.14"
         ],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [start_row, start_row + row_count]
@@ -48,9 +43,8 @@ def get_tv_bulk_data(start_row, row_count):
     except: return []
     return []
 
-st.title("📈 Amerika Hisse Senedi Analiz Platformu")
+st.title("📈 Kurumsal Hisse Analiz Platformu")
 
-# VERİ GÜNCELLEME BUTONU
 if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
     all_rows = []
     bar = st.progress(0)
@@ -61,23 +55,24 @@ if st.button("🚀 14.000 HİSSEYİ SİSTEME YÜKLE"):
         time.sleep(0.4)
     if all_rows:
         df_new = pd.DataFrame(all_rows)
-        # Sütun isimlerini CSV'de netleştiriyoruz
         df_new.to_csv("canli_veriler.csv", index=False)
-        st.success("Veritabanı RSI7 ve RSI14 formatıyla yenilendi!")
+        st.success("Veritabanı en sağlam teknik isimlerle (RSI7/14) yenilendi!")
         st.rerun()
 
 st.divider()
 
 if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
-    # Sayısal veri kontrolü
+    
+    # HATA ÖNLEYİCİ: Sadece mevcut olan sütunları sayıya çevir
+    mevcut_sutunlar = df.columns.tolist()
     for col in ['RSI', 'RSI7', 'RSI14', 'Fiyat']:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in mevcut_sutunlar:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSELER", "📉 TEKNİK DİPTEN DÖNÜŞ"])
+    tab1, tab2 = st.tabs(["🎯 SEÇİLMİŞ HİSSE SENETLERİ", "📉 TEKNİK DİPTEN DÖNÜŞ"])
     
     with tab1:
-        # 1. Sekme: Puanlama (Mevcut mantık korundu)
         ana_df = df[df['Hisse'].isin(ANA_HISSELER)].copy()
         if not ana_df.empty:
             st.dataframe(ana_df[['Hisse', 'Fiyat', 'RSI', 'RSI7', 'RSI14']], use_container_width=True)
@@ -86,16 +81,19 @@ if os.path.exists("canli_veriler.csv"):
         st.subheader("Filtre: RSI < 30 ve RSI7 > RSI14")
         
         if st.button("Taramayı Başlat"):
-            # RSI7 ve RSI14 uyuşmazlığını çözmek için kural
-            mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['RSI7'] > 0)
-            sonuc = df[mask].copy()
-            
-            if not sonuc.empty:
-                st.write(f"🚀 Kriterlere uyan **{len(sonuc)}** hisse bulundu.")
-                st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']].sort_values(by="Hacim", ascending=False))
+            # Eğer RSI7 sütunu oluştuysa tarama yap, yoksa kullanıcıyı uyar
+            if 'RSI7' in df.columns and df['RSI7'].sum() > 0:
+                mask = (df['RSI'] < 30) & (df['RSI7'] > df['RSI14']) & (df['RSI7'] > 0)
+                sonuc = df[mask].copy()
+                
+                if not sonuc.empty:
+                    st.write(f"🚀 Kriterlere uyan **{len(sonuc)}** hisse bulundu.")
+                    st.dataframe(sonuc[['Hisse', 'İsim', 'Fiyat', 'RSI', 'RSI7', 'RSI14', 'Hacim']].sort_values(by="Hacim", ascending=False))
+                else:
+                    st.warning("Bu kriterlere tam uyan (kesişim yapan) hisse şu an yok.")
             else:
-                st.error("Kriterlere uygun hisse bulunamadı. Veritabanındaki RSI7/RSI14 değerlerini kontrol edin.")
-                # Hata ayıklama için örnek tablo
-                st.write("Veritabanı Kontrolü (İlk 5 Satır):", df[['Hisse', 'RSI7', 'RSI14']].head())
+                st.error("Veri Çekme Hatası: TradingView RSI7 verisini göndermedi.")
+                st.info("Alternatif: Sadece RSI < 30 olanları listeliyorum:")
+                st.dataframe(df[df['RSI'] < 30].sort_values(by="RSI").head(20))
 else:
-    st.info("Sistemde veri bulunamadı. Lütfen '14.000 HİSSEYİ SİSTEME YÜKLE' butonuna basın.")
+    st.info("Lütfen verileri güncelleyin.")
