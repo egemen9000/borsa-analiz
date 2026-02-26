@@ -1,0 +1,3 @@
+streamlit
+tradingview-ta
+pandas
