@@ -1,43 +1,88 @@
 import streamlit as st
 import pandas as pd
+import requests
+import time
 import os
 
-st.header("📊 Mevcut Veritabanı Durumu")
+st.set_page_config(page_title="Zaman Makinesi VT", layout="wide")
 
-# Dosya adını senin önceki kodlarda kullandığın isme göre kontrol ediyoruz
-dosya_adi = "ana_veritabani.csv" if os.path.exists("ana_veritabani.csv") else "canli_veriler.csv"
+def get_tv_full_data(offset):
+    url = "https://scanner.tradingview.com/america/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
+        "options": {"lang": "en"},
+        "markets": ["america"],
+        "columns": [
+            "name", 
+            "close", 
+            "Relative.Strength.Index.7",      # Bugün RSI7
+            "Relative.Strength.Index.14",     # Bugün RSI14
+            "Relative.Strength.Index.7[1]",   # DÜN RSI7 (İşte bu eksikti!)
+            "Relative.Strength.Index.14[1]",  # DÜN RSI14 (Bu da eksikti!)
+            "volume"
+        ], 
+        "sort": {"sortBy": "volume", "sortOrder": "desc"},
+        "range": [offset, offset + 1000]
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=20)
+        return res.json().get('data', []) if res.status_code == 200 else None
+    except: return None
 
-if os.path.exists(dosya_adi):
-    df_vt = pd.read_csv(dosya_adi)
+st.title("🛡️ 14.212 Hisse: Dün + Bugün Veri Ambarı")
+
+if st.button("🔴 TÜM PİYASAYI (DÜN+BUGÜN) VT'YE İNDİR"):
+    all_data = []
+    status = st.empty()
+    bar = st.progress(0)
     
-    # Üst Bilgiler
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Toplam Hisse Sayısı", len(df_vt))
-    col2.metric("Dolu Sütunlar", len(df_vt.columns))
-    col3.info(f"Dosya Adı: {dosya_adi}")
+    for i in range(0, 16000, 1000):
+        status.warning(f"📡 Veri kazınıyor: {i} - {i+1000}...")
+        batch = get_tv_full_data(i)
+        
+        if batch:
+            for item in batch:
+                d = item.get('d', [])
+                all_data.append({
+                    "Hisse": item.get('s', '').split(":")[1] if ":" in item.get('s', '') else item.get('s', ''),
+                    "Fiyat": d[1],
+                    "RSI7_Bugun": d[2],
+                    "RSI14_Bugun": d[3],
+                    "RSI7_Dun": d[4],   # Dünkü veri artık burada!
+                    "RSI14_Dun": d[5],  # Dünkü veri artık burada!
+                    "Hacim": d[6]
+                })
+        elif batch == []: break
+        bar.progress(min((i + 1000) / 16000, 1.0))
+        time.sleep(0.5)
+        
+    if all_data:
+        df_vt = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
+        df_vt.to_csv("ana_veritabani.csv", index=False)
+        st.success(f"✅ {len(df_vt)} Hisse Dün+Bugün verisiyle kaydedildi!")
+        st.rerun()
 
-    st.divider()
+st.divider()
 
-    # Arama ve Filtreleme Özelliği
-    arama = st.text_input("🔍 Veritabanında Hisse Ara (Örn: TSLA, AAPL):").upper()
+# --- MEVCUT VT GÖSTERİCİ ---
+if os.path.exists("ana_veritabani.csv"):
+    df = pd.read_csv("ana_veritabani.csv")
+    st.subheader(f"📋 Mevcut Veritabanı ({len(df)} Hisse)")
     
-    if arama:
-        filtreli_df = df_vt[df_vt['Hisse'].str.contains(arama, na=False)]
-        st.subheader(f"'{arama}' İçin Sonuçlar")
-        st.dataframe(filtreli_df, use_container_width=True)
+    # Sütunları kontrol et ki emin olalım
+    st.write("Dolu Sütunlar:", list(df.columns))
+    
+    st.dataframe(df.head(100), use_container_width=True)
+    
+    # Kuralı burada hemen test edelim
+    st.subheader("🚀 'Yukarı Keser' Testi")
+    # Mantık: Dün (7 <= 14) ve Bugün (7 > 14)
+    crossover = df[(df['RSI7_Dun'] <= df['RSI14_Dun']) & (df['RSI7_Bugun'] > df['RSI14_Bugun']) & (df['RSI14_Bugun'] < 30)]
+    
+    if not crossover.empty:
+        st.success(f"🎯 Tam isabet! {len(crossover)} hisse bugün kurala uydu.")
+        st.dataframe(crossover)
     else:
-        st.subheader("📋 Tüm Veritabanı (İlk 500 Satır)")
-        # Performans için ilk 500 satırı gösteriyoruz, istersen hepsine bakabilirsin
-        st.dataframe(df_vt.head(500), use_container_width=True)
-
-    # İndirme Butonu (Lazım olursa diye)
-    csv = df_vt.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Mevcut VT'yi CSV Olarak Bilgisayara İndir",
-        data=csv,
-        file_name="mevcut_borsa_vt.csv",
-        mime="text/csv",
-    )
+        st.info("VT dolu ama şu an tam kesişme anında olan hisse yok baboş.")
 else:
-    st.error("⚠️ Şu an sistemde kayıtlı bir veritabanı bulunamadı!")
-    st.info("Lütfen önce 'TÜM PİYASAYI İNDİR' butonuna basarak 14.212 hisseyi sisteme kaydet.")
+    st.error("VT henüz oluşturulmadı. Kırmızı butona bas!")
