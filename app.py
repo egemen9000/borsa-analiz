@@ -6,7 +6,6 @@ import time
 st.set_page_config(page_title="Borsa Analiz Pro", layout="wide")
 
 # --- HAFIZA KURULUMU ---
-# Uygulama açık olduğu sürece verinin silinmemesini sağlar
 if 'ana_veri' not in st.session_state:
     st.session_state['ana_veri'] = None
 
@@ -56,7 +55,6 @@ with col1:
             time.sleep(0.3)
         
         if all_data:
-            # VERİYİ HAFIZAYA ÇAKIYORUZ
             st.session_state['ana_veri'] = pd.DataFrame(all_data).drop_duplicates(subset=['Hisse'])
             st.success(f"✅ {len(st.session_state['ana_veri'])} Hisse Hafızaya Alındı!")
 
@@ -70,7 +68,6 @@ st.divider()
 
 # --- AKSİYONLAR ---
 
-# 1. Görüntüleme: Hafızayı kontrol et
 if view_vt:
     if st.session_state['ana_veri'] is not None:
         st.subheader("📋 Aktif Veritabanı (Hafızadaki)")
@@ -78,12 +75,9 @@ if view_vt:
     else:
         st.error("⚠️ Hafıza boş baboş! Önce 1. butona basıp verileri çekmelisin.")
 
-# 2. Kural Taraması: Hafıza üzerinden süz
 if find_cross:
     if st.session_state['ana_veri'] is not None:
         df = st.session_state['ana_veri'].copy()
-        
-        # Sayısallaştırma
         for c in ['RSI7','RSI14','RSI7_Dun','RSI14_Dun']:
             df[c] = pd.to_numeric(df[c], errors='coerce')
         
@@ -93,7 +87,7 @@ if find_cross:
         
         if not crossover.empty:
             st.success(f"🎯 Tam bugün kesişen {len(crossover)} hisse yakalandı!")
-                        st.dataframe(crossover.sort_values(by="Hacim", ascending=False), use_container_width=True)
+            st.dataframe(crossover.sort_values(by="Hacim", ascending=False), use_container_width=True)
         else:
             st.warning("⚠️ Şu an tam kesişme anında (cross) olan hisse yok.")
     else:
