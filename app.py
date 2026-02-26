@@ -4,9 +4,11 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title="ABD Veri Deposu Pro", layout="wide")
+st.set_page_config(page_title="Borsa Analiz Pro", layout="wide")
 
-# --- YARDIMCI FONKSİONLAR ---
+# 11 Baboş Hisse Listesi
+BABOS_HISSELER = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'AMD', 'NFLX', 'AVGO', 'ORCL']
+
 def get_tv_bulk_data(start_row, row_count):
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
@@ -16,7 +18,8 @@ def get_tv_bulk_data(start_row, row_count):
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
-        "columns": ["name", "close", "RSI", "VWAP", "EMA20", "volume", "description"],
+        # RSI(7) ve RSI(14) değerlerini de çekiyoruz
+        "columns": ["name", "close", "RSI", "VWAP", "volume", "description", "RSI[7]", "RSI[14]"],
         "sort": {"sortBy": "volume", "sortOrder": "desc"},
         "range": [start_row, start_row + row_count]
     }
@@ -24,87 +27,66 @@ def get_tv_bulk_data(start_row, row_count):
         response = requests.post(url, json=payload, timeout=20)
         if response.status_code == 200:
             data = response.json()
-            return [{"Hisse": item['s'].split(":")[1], "İsim": item['d'][6], "Fiyat": item['d'][1], 
-                     "RSI": item['d'][2], "VWAP": item['d'][3], "EMA20": item['d'][4], "Hacim": item['d'][5]} 
+            return [{"Hisse": item['s'].split(":")[1], "İsim": item['d'][5], "Fiyat": item['d'][1], 
+                     "RSI": item['d'][2], "VWAP": item['d'][3], "Hacim": item['d'][4],
+                     "RSI7": item['d'][6], "RSI14": item['d'][7]} 
                     for item in data['data']]
-    except:
-        return []
+    except: return []
     return []
 
-# --- 1. BÖLÜM: VERİTABANI DURUMU (PROGRESS BAR BURADA) ---
-st.title("🏦 ABD Borsası Dev Veri Deposu")
+st.title("🏦 Dev Veri Deposu & Baboş Analiz")
 
-db_exists = os.path.exists("canli_veriler.csv") and os.path.getsize("canli_veriler.csv") > 0
-
-# Veritabanı Bilgi Paneli
-with st.expander("📊 Veritabanı Durumu ve Güncelleme", expanded=not db_exists):
-    if db_exists:
-        df_status = pd.read_csv("canli_veriler.csv")
-        st.success(f"✅ Veritabanı Hazır: {len(df_status)} Hisse Kayıtlı.")
-    else:
-        st.warning("⚠️ Veritabanı henüz oluşturulmadı. Lütfen güncellemeyi başlatın.")
-
-    if st.button("🚀 14.000 HİSSEYİ İNDİR / GÜNCELLE"):
-        all_rows = []
-        # Ana Progress Bar
-        main_progress = st.progress(0)
-        status_msg = st.empty()
-        
-        start_time = time.time()
-        
-        # 14.000 hisseyi 1000'erli paketlerle çek
-        total_steps = 14
-        for i in range(total_steps):
-            current_row = i * 1000
-            status_msg.info(f"⏳ Paket {i+1}/{total_steps} indiriliyor... ({current_row} - {current_row+1000})")
-            
-            batch = get_tv_bulk_data(current_row, 1000)
-            if batch:
-                all_rows.extend(batch)
-            
-            # Progress Bar Güncelleme
-            main_progress.progress((i + 1) / total_steps)
-            time.sleep(0.4) # Bot koruması için mikro mola
-            
-        if all_rows:
-            df_total = pd.DataFrame(all_rows)
-            df_total.to_csv("canli_veriler.csv", index=False)
-            gecen_sure = round(time.time() - start_time, 2)
-            status_msg.success(f"✅ İşlem Tamamlandı! {len(df_total)} hisse {gecen_sure} saniyede kaydedildi.")
-            time.sleep(2)
-            st.rerun()
+if st.button("🚀 14.000 HİSSEYİ GÜNCELLE"):
+    all_rows = []
+    bar = st.progress(0)
+    status = st.empty()
+    for i in range(0, 14000, 1000):
+        status.write(f"⏳ {i} - {i+1000} indiriliyor...")
+        batch = get_tv_bulk_data(i, 1000)
+        if batch: all_rows.extend(batch)
+        bar.progress((i + 1000) / 14000)
+        time.sleep(0.3)
+    if all_rows:
+        pd.DataFrame(all_rows).to_csv("canli_veriler.csv", index=False)
+        st.rerun()
 
 st.divider()
 
-# --- 2. BÖLÜM: FİLTRELEME VE ANALİZ ---
-if db_exists:
+if os.path.exists("canli_veriler.csv"):
     df = pd.read_csv("canli_veriler.csv")
     
-    st.sidebar.header("🔍 Filtre Ayarları")
-    min_fiyat = st.sidebar.number_input("Minimum Fiyat ($)", value=1.0, step=0.5)
-    min_hacim = st.sidebar.number_input("Minimum Hacim", value=500000, step=100000)
-    rsi_aralik = st.sidebar.slider("RSI Aralığı", 0, 100, (30, 70))
+    c1, c2, c3 = st.columns(3)
+    fiyat_limit = c1.number_input("Min Fiyat ($)", value=1.0)
+    hacim_limit = c2.number_input("Min Hacim", value=500000)
+    rsi_sinir = c3.slider("RSI Sınırı (Dipten Dönüş İçin)", 0, 100, 30)
 
-    tab1, tab2 = st.tabs(["🚀 TREND ANALİZİ", "📉 DİPTEN DÖNÜŞ"])
+    tab1, tab2 = st.tabs(["🎯 11 BABOŞ PUANLAMA", "📉 TEKNİK DİPTEN DÖNÜŞ"])
     
     with tab1:
-        st.subheader("🎯 Güçlü Trend (Fiyat > VWAP & RSI > 50)")
-        if st.button("Trend Filtresini Çalıştır"):
-            # Hızlı Filtreleme
-            res = df[(df['Fiyat'] > df['VWAP']) & 
-                     (df['RSI'] > 50) & 
-                     (df['Fiyat'] >= min_fiyat) & 
-                     (df['Hacim'] >= min_hacim)]
-            st.write(f"Kriterlere uyan **{len(res)}** hisse bulundu.")
-            st.dataframe(res.sort_values(by="Hacim", ascending=False), use_container_width=True)
-            
+        st.subheader("Seçilmiş 11 Hisse Puan Durumu")
+        babo_df = df[df['Hisse'].isin(BABOS_HISSELER)].copy()
+        
+        def puanla(row):
+            puan = 0
+            if row['Fiyat'] > row['VWAP']: puan += 40
+            if row['RSI'] > 50: puan += 30
+            if row['RSI7'] > row['RSI14']: puan += 30
+            return puan
+
+        if not babo_df.empty:
+            babo_df['PUAN'] = babo_df.apply(puanla, axis=1)
+            st.dataframe(babo_df[['Hisse', 'Fiyat', 'PUAN', 'RSI', 'VWAP']].sort_values(by="PUAN", ascending=False))
+        else:
+            st.warning("Baboş hisseler veritabanında bulunamadı, önce güncelleyin.")
+
     with tab2:
-        st.subheader("🔍 Dipten Dönüş (RSI < 30)")
-        if st.button("Dip Filtresini Çalıştır"):
-            res = df[(df['RSI'] < 30) & 
-                     (df['Fiyat'] >= min_fiyat) & 
-                     (df['Hacim'] >= min_hacim)]
-            st.write(f"Kriterlere uyan **{len(res)}** hisse bulundu.")
-            st.dataframe(res.sort_values(by="RSI"), use_container_width=True)
+        st.info(f"Koşul: RSI < {rsi_sinir} VE RSI(7) > RSI(14) (Yukarı Kesim)")
+        if st.button("Teknik Dip Tara"):
+            # Teknik Koşul: RSI < sınır VE RSI(7) yukarı keser RSI(14)
+            sonuc = df[(df['RSI'] < rsi_sinir) & 
+                       (df['RSI7'] > df['RSI14']) & 
+                       (df['Fiyat'] >= fiyat_limit) & 
+                       (df['Hacim'] >= hacim_limit)]
+            st.dataframe(sonuc.sort_values(by="Hacim", ascending=False))
 else:
-    st.info("💡 Uygulamayı kullanmak için önce yukarıdaki menüden veritabanını güncellemelisin.")
+    st.warning("Veritabanı boş, güncelleyin.")
